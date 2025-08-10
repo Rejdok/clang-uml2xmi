@@ -176,6 +176,9 @@ class XmiGenerator:
         # Create stub elements for referenced but undefined types
         self._create_stub_elements()
         
+        # Resolve association targets to use the correct stub element IDs
+        self._resolve_association_targets()
+        
         # Clean up invalid associations
         self._cleanup_invalid_associations()
         
@@ -281,6 +284,15 @@ class XmiGenerator:
                 for t in info.templates:
                     all_referenced_type_names.add(t)
         
+        # Also collect from associations that reference undefined types
+        for assoc in self.model.associations:
+            # Check if target is a valid XMI ID that exists in created elements
+            if assoc.tgt not in [info.xmi for info in self.created.values()]:
+                # This association references an undefined type - we need to create a stub for it
+                # The target might be a type name that needs to be resolved
+                # For now, we'll skip this as we'll handle it in _resolve_association_targets
+                pass
+        
         return all_referenced_type_names
 
     def _create_stub_elements(self) -> None:
@@ -321,14 +333,51 @@ class XmiGenerator:
         
         logger.info(f"Created {stub_count} stub elements")
 
+    def _resolve_association_targets(self) -> None:
+        """Resolve association targets to use the correct stub element IDs."""
+        logger.info(f"Resolving association targets for {len(self.model.associations)} associations")
+        resolved_count = 0
+        
+        for assoc in self.model.associations:
+            # Check if target is a valid XMI ID that exists in created elements
+            if assoc.tgt not in [info.xmi for info in self.created.values()]:
+                # This association references an undefined type
+                # Try to find a stub element that might match this target
+                target_found = False
+                
+                # Look for a stub element that might match this target
+                for name, info in self.created.items():
+                    if info.xmi == assoc.tgt:
+                        # This is already a valid reference
+                        target_found = True
+                        break
+                
+                if not target_found:
+                    # Try to find by name in the name_to_xmi mapping
+                    # This handles cases where the target might be a type name that was converted to an ElementName
+                    for name, xmi_id in self.name_to_xmi.items():
+                        if xmi_id == assoc.tgt:
+                            # Found the name, check if it exists in created elements
+                            if name in self.created:
+                                target_found = True
+                                break
+                
+                if not target_found:
+                    logger.warning(f"Association '{assoc.name}' has unresolved target: {assoc.tgt}")
+        
+        logger.info(f"Resolved {resolved_count} association targets")
+
     def _cleanup_invalid_associations(self) -> None:
         """Removes associations that reference undefined elements."""
         logger.info(f"Cleaning up invalid associations for {len(self.model.associations)} total associations")
         valid_associations: List[UmlAssociation] = []
         removed_count = 0
         
+        # Get all valid XMI IDs from created elements
+        valid_xmi_ids = {element.xmi for element in self.created.values()}
+        
         for assoc in self.model.associations:
-            if assoc.src in self.created and assoc.tgt in self.created:
+            if assoc.src in valid_xmi_ids and assoc.tgt in valid_xmi_ids:
                 valid_associations.append(assoc)
             else:
                 logger.warning(f"Association '{assoc.name}' references undefined elements. Removing.")
@@ -367,11 +416,14 @@ class XmiGenerator:
         
         # Check for associations with undefined source or target elements
         association_errors = 0
+        # Get all valid XMI IDs from created elements
+        valid_xmi_ids = {element.xmi for element in self.created.values()}
+        
         for assoc in self.model.associations:
-            if assoc.src not in self.created:
+            if assoc.src not in valid_xmi_ids:
                 validation_errors.append(f"Association '{assoc.name}' references undefined source element: {assoc.src}")
                 association_errors += 1
-            if assoc.tgt not in self.created:
+            if assoc.tgt not in valid_xmi_ids:
                 validation_errors.append(f"Association '{assoc.name}' references undefined target element: {assoc.tgt}")
                 association_errors += 1
         

@@ -3,7 +3,7 @@
 # ---------- Model builder (parser + initial analysis) ----------
 from typing import Dict, Any, List, Tuple, Set, Optional, Union, cast, TypedDict
 from CppParser import CppTypeParser
-from Utils import xid
+from Utils import xid, stable_id
 from UmlModel import (
     UmlElement, UmlMember, UmlAssociation, ClangMetadata, 
     UmlOperation, UmlModel, UmlGeneralization
@@ -18,6 +18,9 @@ from uml_types import (
     RawTemplateData, RawEnumeratorData, RawUnderlyingTypeData,
     RawBaseClassData, RawInheritanceData
 )
+
+import logging
+logger = logging.getLogger(__name__)
 
 class CppModelBuilder:
     def __init__(self, j: Dict[str, Any]) -> None:
@@ -219,22 +222,38 @@ class CppModelBuilder:
                 
                 self.created[ElementName(template_type)] = template_element
                 self.name_to_xmi[ElementName(template_type)] = template_id
-                print(f"Created missing template element: {template_type}")
+                logger.debug(f"Created missing template element: {template_type}")
 
     def prepare(self) -> None:
         """Prepare the model by creating UML elements from raw data."""
         if self.created:
             return  # Already prepared
         
+        logger.info(f"Starting prepare() with {len(self.j.get('elements', []))} elements")
+        logger.info(f"JSON keys: {list(self.j.keys())}")
+        
+        # Check if elements exist and their structure
+        elements = self.j.get("elements", [])
+        if elements:
+            logger.info(f"First element structure: {type(elements[0])}")
+            if isinstance(elements[0], dict):
+                logger.info(f"First element keys: {list(elements[0].keys())}")
+                logger.info(f"First element name: {elements[0].get('name')}")
+                logger.info(f"First element display_name: {elements[0].get('display_name')}")
+        
         # First pass: create UML elements
-        for el in self.j.get("elements", []):
+        for i, el in enumerate(elements):
             if not isinstance(el, dict):
+                logger.debug(f"Skipping non-dict element {i}: {type(el)}")
                 continue
                 
             # Choose the best name for this element
             name: ElementName = self.choose_name(el)
             if not name:
+                logger.debug(f"Could not choose name for element {i}: {el}")
                 continue
+            
+            logger.debug(f"Creating element {i}: {name}")
             
             # Create XMI ID
             xmi: XmiId = xid()
@@ -261,8 +280,7 @@ class CppModelBuilder:
                     uml_member: UmlMember = self._create_uml_member(m)
                     info.members.append(uml_member)
         
-        # NEW: Create missing template elements
-        self._create_missing_template_elements()
+        logger.info(f"Prepare() completed. Created {len(self.created)} elements")
 
     @staticmethod
     def normalize_template_name_for_matching(name: str) -> str:
@@ -346,7 +364,11 @@ class CppModelBuilder:
         # Resolve base template
         base_id = CppModelBuilder.find_best_template_match(template_name, candidates)
         if base_id:
-            resolved_ids.append(base_id)
+            # Validate that the base_id exists in candidates
+            if any(candidate_info.xmi == base_id for _, candidate_info in candidates):
+                resolved_ids.append(base_id)
+            else:
+                logger.warning(f"Warning: Template base ID {base_id} not found in candidates for {template_name}")
         
         # Resolve template arguments
         for arg in template_args:
@@ -418,9 +440,9 @@ class CppModelBuilder:
                 base_info["id"] = None
             
             # Debug: log the structure of base_info
-            print(f"DEBUG: base_info structure: {base_info}")
-            print(f"DEBUG: base_info['name'] type: {type(base_info['name'])}")
-            print(f"DEBUG: base_info['name'] value: {base_info['name']}")
+            logger.debug(f"base_info structure: {base_info}")
+            logger.debug(f"base_info['name'] type: {type(base_info['name'])}")
+            logger.debug(f"base_info['name'] value: {base_info['name']}")
                 
             if base_info["name"] and not any(b["name"] == base_info["name"] for b in base_classes):
                 base_classes.append(base_info)
@@ -451,7 +473,7 @@ class CppModelBuilder:
                 if not base_name:
                     continue
                 
-                print(f"Processing base class: {name} -> {base_name}")
+                logger.debug(f"Processing base class: {name} -> {base_name}")
                 
                 # Try to find base class by various methods
                 base_xmi_id: Optional[XmiId] = None
@@ -459,12 +481,12 @@ class CppModelBuilder:
                 # Method 1: Try to find by ID if available
                 if base_info.get("id") and base_info["id"] in id_to_element:
                     base_xmi_id = id_to_element[base_info["id"]].xmi
-                    print(f"Found base class by ID: {name} -> {base_name}")
+                    logger.debug(f"Found base class by ID: {name} -> {base_name}")
                 
                 # Method 2: Try to find by exact name match
                 if not base_xmi_id and ElementName(base_name) in self.name_to_xmi:
                     base_xmi_id = self.name_to_xmi[ElementName(base_name)]
-                    print(f"Found base class by exact name: {name} -> {base_name}")
+                    logger.debug(f"Found base class by exact name: {name} -> {base_name}")
                 
                 # Method 3: Try to find by display_name
                 if not base_xmi_id:
@@ -473,7 +495,7 @@ class CppModelBuilder:
                         if (candidate_info.original_data and 
                             candidate_info.original_data.get('display_name') == base_name):
                             base_xmi_id = candidate_info.xmi
-                            print(f"Found base class by display_name: {name} -> {base_name}")
+                            logger.debug(f"Found base class by display_name: {name} -> {base_name}")
                             break
                 
                 # Method 4: Enhanced template base name resolution
@@ -485,14 +507,14 @@ class CppModelBuilder:
                         candidates = [(name, info) for name, info in self.created.items()]
                         base_xmi_id = self.find_best_template_match(base_name, candidates)
                         if base_xmi_id:
-                            print(f"Found base class by template base: {name} -> {base_name} (matched template: {base_template})")
+                            logger.debug(f"Found base class by template base: {name} -> {base_name} (matched template: {base_template})")
                         else:
                             # Try to resolve template dependencies
                             resolved_ids = self.resolve_template_dependencies(base_name, candidates)
                             if resolved_ids:
                                 # Use the first resolved ID as the base class
                                 base_xmi_id = resolved_ids[0]
-                                print(f"Found base class by template dependency resolution: {name} -> {base_name}")
+                                logger.debug(f"Found base class by template dependency resolution: {name} -> {base_name}")
                 
                 # Method 5: Try to find by namespace + simple name
                 if not base_xmi_id and '::' in base_name:
@@ -507,7 +529,7 @@ class CppModelBuilder:
                             
                             if candidate_namespace == namespace and candidate_simple == simple_name:
                                 base_xmi_id = candidate_info.xmi
-                                print(f"Found base class by namespace+name: {name} -> {base_name} (matched: {candidate_name})")
+                                logger.debug(f"Found base class by namespace+name: {name} -> {base_name} (matched: {candidate_name})")
                                 break
                 
                 # Method 6: Try fuzzy matching for template types
@@ -520,7 +542,7 @@ class CppModelBuilder:
                             candidate_simple = self.extract_simple_name(str(candidate_info.name))
                             if candidate_simple == simple_base:
                                 base_xmi_id = candidate_info.xmi
-                                print(f"Found base class by fuzzy template matching: {name} -> {base_name} (matched: {candidate_name})")
+                                logger.debug(f"Found base class by fuzzy template matching: {name} -> {base_name} (matched: {candidate_name})")
                                 break
                 
                 if base_xmi_id:
@@ -548,19 +570,160 @@ class CppModelBuilder:
                     
                     if not existing:
                         self.generalizations.append(generalization)
-                        print(f"Added inheritance: {name} -> {base_name} ({access})")
+                        logger.debug(f"Added inheritance: {name} -> {base_name} ({access})")
                 else:
                     # Base class not found - add as dependency
                     if (info.name, TypeName(base_name)) not in self.dependencies:
                         self.dependencies.append((info.name, TypeName(base_name)))
-                        print(f"Added dependency for unknown base class: {name} -> {base_name}")
+                        logger.debug(f"Added dependency for unknown base class: {name} -> {base_name}")
 
-    def build(self) -> BuildResult:
-        # prepare if not done
-        if not self.created:
-            self.prepare()
+    def _build_associations(self) -> None:
+        """Build associations for all elements, including template dependencies."""
+        for name, info in self.created.items():
+            owner_xmi: XmiId = info.xmi
+            
+            # Skip if no members
+            if not hasattr(info, 'members') or not info.members:
+                continue
+                
+            for m in info.members:
+                type_repr: Optional[str] = m.type_repr
+                if not type_repr:
+                    continue
+                
+                # Enhanced type parsing for templates
+                parsed: List[str] = CppTypeParser.extract_all_type_identifiers(type_repr)
+                matched: List[str] = CppTypeParser.match_known_types_from_parsed(parsed, [str(k) for k in self.name_to_xmi.keys()])
+                
+                # If no direct matches found, try template resolution
+                if not matched and '<' in type_repr:
+                    candidates = [(name, info) for name, info in self.created.items()]
+                    resolved_ids = self.resolve_template_dependencies(type_repr, candidates)
+                    if resolved_ids:
+                        # Create associations for resolved template dependencies
+                        for resolved_id in resolved_ids:
+                            # Validate that resolved_id is a valid XMI ID and exists in created elements
+                            if resolved_id and resolved_id in [info.xmi for info in self.created.values()]:
+                                association: UmlAssociation = UmlAssociation(
+                                    src=owner_xmi,
+                                    tgt=resolved_id,
+                                    aggregation=AggregationType.NONE,
+                                    multiplicity="1",
+                                    name=f"{m.name}_template_dep"
+                                )
+                                self.associations.append(association)
+                                logger.debug(f"Added template dependency association: {name}.{m.name} -> {resolved_id}")
+                            else:
+                                logger.warning(f"Warning: Skipping invalid template dependency ID: {resolved_id}")
+                
+                an: Dict[str, Any] = CppTypeParser.analyze_type_expr(type_repr)
+                outer_base: str = an.get("template_base") or ""
+                is_container: bool = any(k in outer_base for k in CppTypeParser._CONTAINER_KEYWORDS) or outer_base in CppTypeParser._CONTAINER_KEYWORDS
+                is_smart: bool = any(k in outer_base for k in CppTypeParser._SMART_PTRS) or outer_base in CppTypeParser._SMART_PTRS
+                
+                for mt in matched:
+                    tgt_xmi: Optional[XmiId] = self.name_to_xmi.get(ElementName(mt))
+                    
+                    # If target type doesn't exist, create a stub element for it
+                    if not tgt_xmi:
+                        # Create stub element for this type
+                        stub_id: XmiId = XmiId(stable_id(f"stub:{mt}"))
+                        self.name_to_xmi[ElementName(mt)] = stub_id
+                        
+                        # Create stub UmlElement
+                        stub_element: UmlElement = UmlElement(
+                            xmi=stub_id,
+                            name=ElementName(mt),
+                            kind=ElementKind.DATATYPE,
+                            members=[],
+                            clang=ClangMetadata(),
+                            used_types=frozenset(),
+                            underlying=None
+                        )
+                        
+                        # Add to created elements
+                        self.created[ElementName(mt)] = stub_element
+                        
+                        tgt_xmi = stub_id
+                        logger.debug(f"Created stub element for type: {mt} with ID: {stub_id}")
+                    
+                    # Validate that both source and target XMI IDs exist in created elements
+                    # This validation prevents invalid associations from being created
+                    if owner_xmi not in [info.xmi for info in self.created.values()]:
+                        logger.warning(f"Warning: Skipping association with invalid source ID: {owner_xmi}")
+                        continue
+                    if tgt_xmi not in [info.xmi for info in self.created.values()]:
+                        logger.warning(f"Warning: Skipping association with invalid target ID: {tgt_xmi}")
+                        continue
+                    
+                    # heuristic aggregation
+                    if is_smart:
+                        aggregation_str: str = "composite" if "unique" in outer_base or "unique_ptr" in outer_base else "shared"
+                        # UML uses 'shared' not standard; keep 'none' or 'composite'
+                        if aggregation_str not in ("composite", "shared"):
+                            aggregation_str = "none"
+                    else:
+                        if an["is_pointer"] or an["is_reference"] or an["is_rref"]:
+                            aggregation_str = "shared"
+                        else:
+                            aggregation_str = "none"
+                    
+                    # Convert string to AggregationType enum
+                    try:
+                        aggregation: AggregationType = AggregationType(aggregation_str)
+                    except ValueError:
+                        aggregation = AggregationType.NONE
+                    
+                    mult: str = "*" if is_container or an["is_array"] else "1"
+                    
+                    association: UmlAssociation = UmlAssociation(
+                        src=owner_xmi,
+                        tgt=tgt_xmi,
+                        aggregation=aggregation,
+                        multiplicity=mult,
+                        name=m.name
+                    )
+                    self.associations.append(association)
 
-        # second pass: collect members, operations, templates, typedef underlying, associations
+    def _build_dependencies(self) -> None:
+        """Build dependencies for all elements, including template dependencies."""
+        for name, info in self.created.items():
+            used: frozenset[TypeName] = info.used_types or frozenset()
+            for typename in used:
+                if not typename:
+                    continue
+                # skip if known as element
+                # match via parsed tokens
+                if ElementName(str(typename)) in self.name_to_xmi:
+                    continue
+                
+                # Enhanced template type resolution
+                if '<' in str(typename):
+                    candidates = [(name, info) for name, info in self.created.items()]
+                    resolved_ids = self.resolve_template_dependencies(str(typename), candidates)
+                    if resolved_ids:
+                        # If we can resolve template dependencies, we don't need to add this as a dependency
+                        logger.debug(f"Resolved template dependencies for {typename}: {resolved_ids}")
+                        continue
+                
+                parsed: List[str] = CppTypeParser.extract_all_type_identifiers(str(typename))
+                cand: List[str] = CppTypeParser.match_known_types_from_parsed(parsed, [str(k) for k in self.name_to_xmi.keys()])
+                if cand:
+                    # already accounted as association maybe; otherwise add dependency to first match
+                    continue
+                
+                # Try to extract base template name for better dependency tracking
+                if '<' in str(typename):
+                    base_template, _ = CppTypeParser.parse_template_args(str(typename))
+                    # Add dependency on base template if it's not already known
+                    if base_template and ElementName(base_template) not in self.name_to_xmi:
+                        self.dependencies.append((info.name, TypeName(base_template)))
+                        logger.debug(f"Added dependency for template base: {name} -> {base_template}")
+                
+                self.dependencies.append((info.name, TypeName(str(typename))))
+
+    def _process_element_details(self) -> None:
+        """Process templates, enums, typedefs, members, and operations for all elements."""
         for name, info in list(self.created.items()):
             # Use original data instead of clang metadata for dictionary access
             el: RawElementData = info.original_data
@@ -668,128 +831,45 @@ class CppModelBuilder:
             if used_types_set:
                 info.used_types = frozenset(used_types_set)
 
-        # associations: for each member try to match known types with improved template handling
-        for name, info in self.created.items():
-            owner_xmi: XmiId = info.xmi
-            raws: List[UmlMember] = info.members
-            for m in raws:
-                type_repr: Optional[str] = m.type_repr
-                if not type_repr:
-                    continue
-                
-                # Enhanced type parsing for templates
-                parsed: List[str] = CppTypeParser.extract_all_type_identifiers(type_repr)
-                matched: List[str] = CppTypeParser.match_known_types_from_parsed(parsed, [str(k) for k in self.name_to_xmi.keys()])
-                
-                # If no direct matches found, try template resolution
-                if not matched and '<' in type_repr:
-                    candidates = [(name, info) for name, info in self.created.items()]
-                    resolved_ids = self.resolve_template_dependencies(type_repr, candidates)
-                    if resolved_ids:
-                        # Create associations for resolved template dependencies
-                        for resolved_id in resolved_ids:
-                            # Validate that resolved_id is a valid XMI ID
-                            if resolved_id and resolved_id in [info.xmi for info in self.created.values()]:
-                                association: UmlAssociation = UmlAssociation(
-                                    src=owner_xmi,
-                                    tgt=resolved_id,
-                                    aggregation=AggregationType.NONE,
-                                    multiplicity="1",
-                                    name=f"{m.name}_template_dep"
-                                )
-                                self.associations.append(association)
-                                print(f"Added template dependency association: {name}.{m.name} -> {resolved_id}")
-                            else:
-                                print(f"Warning: Skipping invalid template dependency ID: {resolved_id}")
-                
-                an: Dict[str, Any] = CppTypeParser.analyze_type_expr(type_repr)
-                outer_base: str = an.get("template_base") or ""
-                is_container: bool = any(k in outer_base for k in CppTypeParser._CONTAINER_KEYWORDS) or outer_base in CppTypeParser._CONTAINER_KEYWORDS
-                is_smart: bool = any(k in outer_base for k in CppTypeParser._SMART_PTRS) or outer_base in CppTypeParser._SMART_PTRS
-                
-                for mt in matched:
-                    tgt_xmi: Optional[XmiId] = self.name_to_xmi.get(ElementName(mt))
-                    if not tgt_xmi:
-                        continue
-                    
-                    # Validate that both source and target XMI IDs exist in created elements
-                    if owner_xmi not in [info.xmi for info in self.created.values()]:
-                        print(f"Warning: Skipping association with invalid source ID: {owner_xmi}")
-                        continue
-                    if tgt_xmi not in [info.xmi for info in self.created.values()]:
-                        print(f"Warning: Skipping association with invalid target ID: {tgt_xmi}")
-                        continue
-                    
-                    # heuristic aggregation
-                    if is_smart:
-                        aggregation_str: str = "composite" if "unique" in outer_base or "unique_ptr" in outer_base else "shared"
-                        # UML uses 'shared' not standard; keep 'none' or 'composite'
-                        if aggregation_str not in ("composite", "shared"):
-                            aggregation_str = "none"
-                    else:
-                        if an["is_pointer"] or an["is_reference"] or an["is_rref"]:
-                            aggregation_str = "shared"
-                        else:
-                            aggregation_str = "none"
-                    
-                    # Convert string to AggregationType enum
-                    try:
-                        aggregation: AggregationType = AggregationType(aggregation_str)
-                    except ValueError:
-                        aggregation = AggregationType.NONE
-                    
-                    mult: str = "*" if is_container or an["is_array"] else "1"
-                    
-                    association: UmlAssociation = UmlAssociation(
-                        src=owner_xmi,
-                        tgt=tgt_xmi,
-                        aggregation=aggregation,
-                        multiplicity=mult,
-                        name=m.name
-                    )
-                    self.associations.append(association)
-
-        # dependencies: types used but unknown with improved template handling
-        for name, info in self.created.items():
-            used: frozenset[TypeName] = info.used_types or frozenset()
-            for typename in used:
-                if not typename:
-                    continue
-                # skip if known as element
-                # match via parsed tokens
-                if ElementName(str(typename)) in self.name_to_xmi:
-                    continue
-                
-                # Enhanced template type resolution
-                if '<' in str(typename):
-                    candidates = [(name, info) for name, info in self.created.items()]
-                    resolved_ids = self.resolve_template_dependencies(str(typename), candidates)
-                    if resolved_ids:
-                        # If we can resolve template dependencies, we don't need to add this as a dependency
-                        print(f"Resolved template dependencies for {typename}: {resolved_ids}")
-                        continue
-                
-                parsed: List[str] = CppTypeParser.extract_all_type_identifiers(str(typename))
-                cand: List[str] = CppTypeParser.match_known_types_from_parsed(parsed, [str(k) for k in self.name_to_xmi.keys()])
-                if cand:
-                    # already accounted as association maybe; otherwise add dependency to first match
-                    continue
-                
-                # Try to extract base template name for better dependency tracking
-                if '<' in str(typename):
-                    base_template, _ = CppTypeParser.parse_template_args(str(typename))
-                    # Add dependency on base template if it's not already known
-                    if base_template and ElementName(base_template) not in self.name_to_xmi:
-                        self.dependencies.append((info.name, TypeName(base_template)))
-                        print(f"Added dependency for template base: {name} -> {base_template}")
-                
-                self.dependencies.append((info.name, TypeName(str(typename))))
-
-        # NEW: Process inheritance relationships
+    def build(self) -> BuildResult:
+        # prepare if not done
+        if not hasattr(self, 'created') or not self.created:
+            logger.info("build() called, preparing model...")
+            self.prepare()
+        else:
+            logger.info(f"build() called, model already prepared with {len(self.created)} elements")
+        
+        logger.info(f"Starting build phases with {len(self.created)} elements")
+        
+        # Phase 1: Create all elements (including missing template elements)
+        logger.info("Phase 1: Creating missing template elements...")
+        self._create_missing_template_elements()
+        logger.info(f"After Phase 1: {len(self.created)} elements")
+        
+        # Phase 2: Process element details (templates, enums, typedefs, members, operations)
+        # This must come before associations since associations depend on members
+        logger.info("Phase 2: Processing element details...")
+        self._process_element_details()
+        logger.info(f"After Phase 2: {len(self.created)} elements")
+        
+        # Phase 3: Build associations (deferred until after all elements and members exist)
+        logger.info("Phase 3: Building associations...")
+        self._build_associations()
+        logger.info(f"After Phase 3: {len(self.associations)} associations")
+        
+        # Phase 4: Build dependencies
+        logger.info("Phase 4: Building dependencies...")
+        self._build_dependencies()
+        logger.info(f"After Phase 4: {len(self.dependencies)} dependencies")
+        
+        # Phase 5: Process inheritance relationships
+        logger.info("Phase 5: Processing inheritance relationships...")
         self._resolve_base_class_references()
+        logger.info(f"After Phase 5: {len(self.generalizations)} generalizations")
 
         # expose project_name + created + lists
         project_name: str = self.j.get("project_name") or self.j.get("project") or "clang_uml_model"
+        logger.info(f"Build completed. Returning {len(self.created)} elements, {len(self.associations)} associations, {len(self.dependencies)} dependencies")
         return {
             "project_name": project_name,
             "created": self.created,
