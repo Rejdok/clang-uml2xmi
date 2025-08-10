@@ -193,7 +193,11 @@ class XmiWriter:
             is_final: Whether class is final
         """
         # use attribute 'general' to reference parent classifier by id
-        attrs = {self.config.xmi_id: gid, "general": str(general_ref)}
+        attrs = {
+            self.config.xmi_id: gid, 
+            self.config.xmi_type: "uml:Generalization",
+            "general": str(general_ref)
+        }
         
         # Add inheritance type if specified
         if inheritance_type and inheritance_type != "public":

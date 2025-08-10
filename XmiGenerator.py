@@ -44,9 +44,10 @@ class XmiElementVisitor:
 class UmlXmiWritingVisitor(XmiElementVisitor):
     """Concrete visitor that writes UML elements to an XMI file."""
     
-    def __init__(self, writer: XmiWriter, name_to_xmi: Dict[ElementName, XmiId]) -> None:
+    def __init__(self, writer: XmiWriter, name_to_xmi: Dict[ElementName, XmiId], model: UmlModel) -> None:
         self.writer: XmiWriter = writer
         self.name_to_xmi: Dict[ElementName, XmiId] = name_to_xmi
+        self.model: UmlModel = model
 
     def visit_class(self, info: UmlElement) -> None:
         name: ElementName = info.name
@@ -73,6 +74,18 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
                 template_id: str = stable_id(xmi + ":template:" + str(i))
                 self.writer.write_template_parameter(template_id, template_param)
             self.writer.end_template_signature()
+        
+        # Write generalizations as owned elements
+        generalizations = getattr(self.model, "generalizations", []) or []
+        for gen in generalizations:
+            if gen.child_id == xmi:  # This generalization belongs to this class
+                self.writer.write_generalization(
+                    stable_id(str(gen.child_id) + ":gen"), 
+                    gen.parent_id,
+                    inheritance_type=gen.inheritance_type.value if gen.inheritance_type else "public",
+                    is_virtual=gen.is_virtual,
+                    is_final=gen.is_final
+                )
         
         for m in info.members:
             aid: str = stable_id(xmi + ":attr:" + m.name)
@@ -519,7 +532,7 @@ class XmiGenerator:
                 writer: XmiWriter = XmiWriter(xf, xml_model=DEFAULT_MODEL.xml)
                 writer.start_doc(project_name, model_id="model_1")
                 
-                visitor: UmlXmiWritingVisitor = UmlXmiWritingVisitor(writer, self.name_to_xmi)
+                visitor: UmlXmiWritingVisitor = UmlXmiWritingVisitor(writer, self.name_to_xmi, self.model)
                 
                 # Write packaged elements (including stubs in their namespaces)
                 self._write_package_contents(visitor, namespace_tree)
@@ -566,15 +579,9 @@ class XmiGenerator:
                             logger.debug(f"Available names in name_to_xmi: {list(self.name_to_xmi.keys())[:10]}...")
 
                 generalizations = getattr(self.model, "generalizations", []) or []
-                logger.info(f"Writing {len(generalizations)} generalizations")
-                for gen in generalizations:
-                    writer.write_generalization(
-                        stable_id(str(gen.child_id) + ":gen"), 
-                        gen.parent_id,
-                        inheritance_type=gen.inheritance_type.value if gen.inheritance_type else "public",
-                        is_virtual=gen.is_virtual,
-                        is_final=gen.is_final
-                    )
+                logger.info(f"Writing {len(generalizations)} generalizations as owned elements of classes")
+                # Generalizations are now written as owned elements of classes in visit_class method
+                # No need to write them here at the root level
 
                 writer.end_doc()
                 logger.info("XMI file generated successfully")
