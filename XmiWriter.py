@@ -108,6 +108,18 @@ class XmiWriter:
         ctx.__exit__(None, None, None)
 
     def write_owned_parameter(self, pid: str, name: str, direction: str = "in", type_ref: Optional[XmiId] = None, default_value: Optional[str] = None, is_ordered: bool = True, is_unique: bool = True) -> None:
+        # Debug logging to help identify invalid direction values
+        import logging
+        if direction.startswith("id_"):
+            logging.error(f"CRITICAL: Parameter direction appears to be an ID: {direction} for parameter '{name}' with ID {pid}")
+        
+        # Validate direction parameter to prevent IllegalValueException
+        valid_directions = {"in", "out", "inout", "return"}
+        if direction not in valid_directions:
+            # Log warning and use default direction
+            logging.warning(f"Invalid parameter direction '{direction}' for parameter '{name}', using 'in' instead")
+            direction = "in"
+        
         # NOTE: use attribute `type` to reference parameter type by xmi:id
         attrs: ElementAttributes = {self.config.xmi_id: pid, "name": xml_text(name), "direction": xml_text(direction)}
         attrs["isOrdered"] = "true" if is_ordered else "false"
@@ -131,17 +143,41 @@ class XmiWriter:
     
     def write_operation_return_type(self, type_ref: XmiId) -> None:
         """Write the return type for an operation."""
+        # Validate direction value to prevent IllegalValueException
+        direction = "return"
+        valid_directions = {"in", "out", "inout", "return"}
+        if direction not in valid_directions:
+            # This should never happen, but add validation just in case
+            import logging
+            logging.error(f"Invalid return parameter direction '{direction}', using 'return' instead")
+            direction = "return"
+            
         el: etree._Element = etree.Element("ownedParameter", attrib={
             self.config.xmi_id: stable_id("return_param"),
-            "direction": "return",
+            "direction": direction,
             "type": str(type_ref)
         }, nsmap=self.config.uml_nsmap)
         self.xf.write(el)
     
+    def start_template_signature(self, signature_id: str) -> None:
+        """Start a template signature element that contains template parameters."""
+        ctx: etree._Element = self.xf.element("ownedTemplateSignature", attrib={
+            self.config.xmi_id: signature_id,
+            self.config.xmi_type: "uml:RedefinableTemplateSignature"
+        }, nsmap=self.config.uml_nsmap)
+        ctx.__enter__()
+        self._ctx_stack.append(ctx)
+
+    def end_template_signature(self) -> None:
+        """End a template signature element."""
+        ctx: etree._Element = self._ctx_stack.pop()
+        ctx.__exit__(None, None, None)
+
     def write_template_parameter(self, template_id: str, parameter_name: str) -> None:
-        """Write a template parameter element."""
-        el: etree._Element = etree.Element("ownedTemplateSignature", attrib={
+        """Write a template parameter element within a template signature."""
+        el: etree._Element = etree.Element("ownedTemplateParameter", attrib={
             self.config.xmi_id: template_id,
+            self.config.xmi_type: "uml:TemplateParameter",
             "name": xml_text(parameter_name)
         }, nsmap=self.config.uml_nsmap)
         self.xf.write(el)

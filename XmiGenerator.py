@@ -67,9 +67,12 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
         
         # Write template parameters if this is a template class
         if hasattr(info, 'templates') and info.templates:
+            signature_id: str = stable_id(xmi + ":templateSignature")
+            self.writer.start_template_signature(signature_id)
             for i, template_param in enumerate(info.templates):
                 template_id: str = stable_id(xmi + ":template:" + str(i))
                 self.writer.write_template_parameter(template_id, template_param)
+            self.writer.end_template_signature()
         
         for m in info.members:
             aid: str = stable_id(xmi + ":attr:" + m.name)
@@ -93,9 +96,21 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
             
             # Add parameters
             for param_name, param_type in op.parameters:
+                # Validate parameter data to prevent invalid direction values
+                if not isinstance(param_name, str) or not isinstance(param_type, str):
+                    import logging
+                    logging.warning(f"Skipping invalid parameter data: name={param_name}, type={param_type}")
+                    continue
+                    
+                # Ensure parameter name is not an ID
+                if param_name.startswith("id_"):
+                    import logging
+                    logging.warning(f"Parameter name appears to be an ID, using 'unnamed_param': {param_name}")
+                    param_name = "unnamed_param"
+                
                 param_id: str = stable_id(op_id + ":param:" + param_name)
                 param_type_ref: Optional[XmiId] = self.name_to_xmi.get(ElementName(param_type)) if param_type else None
-                self.writer.write_owned_parameter(param_id, param_name, param_type_ref)
+                self.writer.write_owned_parameter(param_id, param_name, "in", param_type_ref)
             
             self.writer.end_owned_operation()
         
@@ -160,6 +175,9 @@ class XmiGenerator:
         
         # Create stub elements for referenced but undefined types
         self._create_stub_elements()
+        
+        # Clean up invalid associations
+        self._cleanup_invalid_associations()
         
         # Update namespace tree with stubs
         self.namespace_tree = self._build_namespace_tree(self.created)
@@ -262,11 +280,6 @@ class XmiGenerator:
             if hasattr(info, 'templates'):
                 for t in info.templates:
                     all_referenced_type_names.add(t)
-            
-            # Collect from associations
-            for assoc in self.model.associations:
-                if assoc.name:
-                    all_referenced_type_names.add(assoc.name)
         
         return all_referenced_type_names
 
@@ -276,36 +289,63 @@ class XmiGenerator:
         stub_count = 0
         
         for type_name in self.all_referenced_type_names:
-            if type_name not in self.created and ElementName(type_name) not in self.name_to_xmi:
-                try:
-                    # Create stub element
-                    stub_id: XmiId = XmiId(stable_id(f"stub:{type_name}"))
-                    self.name_to_xmi[ElementName(type_name)] = stub_id
-                    
-                    # Create stub UmlElement
-                    stub_element: UmlElement = UmlElement(
-                        xmi=stub_id,
-                        name=ElementName(type_name),
-                        kind=ElementKind.DATATYPE,
-                        members=[],
-                        clang=ClangMetadata(),
-                        used_types=frozenset(),
-                        underlying=None
-                    )
-                    
-                    self.created[ElementName(type_name)] = stub_element
-                    stub_count += 1
-                    logger.debug(f"Created stub for type: {type_name}")
-                except Exception as e:
-                    logger.error(f"Error creating stub for type {type_name}: {e}")
+            # Skip if already created or if it's a primitive type
+            if type_name in self.created or ElementName(type_name) in self.name_to_xmi:
+                continue
+                
+            # Skip primitive types that don't need stubs
+            if type_name in ['int', 'char', 'bool', 'float', 'double', 'void', 'string', 'std::string']:
+                continue
+                
+            try:
+                # Create stub element
+                stub_id: XmiId = XmiId(stable_id(f"stub:{type_name}"))
+                self.name_to_xmi[ElementName(type_name)] = stub_id
+                
+                # Create stub UmlElement
+                stub_element: UmlElement = UmlElement(
+                    xmi=stub_id,
+                    name=ElementName(type_name),
+                    kind=ElementKind.DATATYPE,
+                    members=[],
+                    clang=ClangMetadata(),
+                    used_types=frozenset(),
+                    underlying=None
+                )
+                
+                self.created[ElementName(type_name)] = stub_element
+                stub_count += 1
+                logger.debug(f"Created stub for type: {type_name}")
+            except Exception as e:
+                logger.error(f"Error creating stub for type {type_name}: {e}")
         
         logger.info(f"Created {stub_count} stub elements")
+
+    def _cleanup_invalid_associations(self) -> None:
+        """Removes associations that reference undefined elements."""
+        logger.info(f"Cleaning up invalid associations for {len(self.model.associations)} total associations")
+        valid_associations: List[UmlAssociation] = []
+        removed_count = 0
+        
+        for assoc in self.model.associations:
+            if assoc.src in self.created and assoc.tgt in self.created:
+                valid_associations.append(assoc)
+            else:
+                logger.warning(f"Association '{assoc.name}' references undefined elements. Removing.")
+                logger.debug(f"Association '{assoc.name}' src: {assoc.src}, tgt: {assoc.tgt}")
+                removed_count += 1
+        
+        self.model.associations = valid_associations
+        logger.info(f"Removed {removed_count} invalid associations. {len(self.model.associations)} associations remain.")
 
     def _validate_model(self) -> None:
         """Validate the model before XMI generation."""
         logger.info("Validating model...")
         
         validation_errors: List[str] = []
+        
+        # Create reverse mapping from XMI ID to ElementName for validation
+        xmi_to_name: Dict[XmiId, ElementName] = {xmi_id: name for name, xmi_id in self.name_to_xmi.items()}
         
         # Check for elements without names
         for name, element in self.created.items():
@@ -318,13 +358,25 @@ class XmiGenerator:
             
             # Check for members with invalid types
             for member in element.members:
-                if member.type_repr and ElementName(member.type_repr) not in self.name_to_xmi:
-                    validation_errors.append(f"Member {member.name} in {name} references undefined type: {member.type_repr}")
+                if member.type_repr:
+                    # Skip primitive types that don't need UML elements
+                    if member.type_repr in ['int', 'char', 'bool', 'float', 'double', 'void', 'string', 'std::string', 'long', 'short', 'unsigned', 'signed']:
+                        continue
+                    if ElementName(member.type_repr) not in self.name_to_xmi:
+                        validation_errors.append(f"Member {member.name} in {name} references undefined type: {member.type_repr}")
         
-        # Check for circular dependencies in associations
+        # Check for associations with undefined source or target elements
+        association_errors = 0
         for assoc in self.model.associations:
-            if assoc.src not in self.name_to_xmi or assoc.tgt not in self.name_to_xmi:
-                validation_errors.append(f"Association {assoc.name} references undefined types: {assoc.src} -> {assoc.tgt}")
+            if assoc.src not in self.created:
+                validation_errors.append(f"Association '{assoc.name}' references undefined source element: {assoc.src}")
+                association_errors += 1
+            if assoc.tgt not in self.created:
+                validation_errors.append(f"Association '{assoc.name}' references undefined target element: {assoc.tgt}")
+                association_errors += 1
+        
+        if association_errors > 0:
+            logger.warning(f"Found {association_errors} association reference issues")
         
         if validation_errors:
             logger.warning(f"Model validation found {len(validation_errors)} issues:")
@@ -427,6 +479,9 @@ class XmiGenerator:
 
                 logger.info(f"Writing {len(self.model.dependencies)} dependencies")
                 for owner_q_name, typ in self.model.dependencies:
+                    # Debug: log the actual structure of dependencies
+                    logger.debug(f"Dependency: owner={owner_q_name} (type: {type(owner_q_name)}), typ={typ} (type: {type(typ)})")
+                    
                     client_info: Optional[UmlElement] = self.created.get(ElementName(owner_q_name))
                     if not client_info:
                         logger.warning(f"Client not found for dependency: {owner_q_name} -> {typ}")
@@ -451,6 +506,12 @@ class XmiGenerator:
                         xf.write(dep_el)
                     else:
                         logger.warning(f"Missing client or supplier for dependency: {owner_q_name} -> {typ}")
+                        # Debug: log more details about what's missing
+                        if not client_id:
+                            logger.debug(f"Client ID missing for: {owner_q_name}")
+                        if not supplier_id:
+                            logger.debug(f"Supplier ID missing for: {typ} (searched as: {ElementName(typ)})")
+                            logger.debug(f"Available names in name_to_xmi: {list(self.name_to_xmi.keys())[:10]}...")
 
                 generalizations = getattr(self.model, "generalizations", []) or []
                 logger.info(f"Writing {len(generalizations)} generalizations")
