@@ -2,23 +2,35 @@
 # ---------- Notation writer (Papyrus minimal) ----------
 from typing import Any, Dict
 
-from XmiCommon import *
+from Config import LayoutConfig, DiagramConfig, DEFAULT_CONFIG
+from Model import DiagramModel, UmlModel, DEFAULT_MODEL
 from Utils import stable_id
 from lxml import etree
 
 class NotationWriter:
-    def __init__(self, created: Dict[str, Any], out_notation: str, row_wrap: int = 10,
-                 step_x: int = 300, step_y: int = 200, width: int = 180, height: int = 100):
+    def __init__(self, created: Dict[str, Any], out_notation: str, 
+                 config: DiagramConfig = None, model: DiagramModel = None):
         self.created = created
         self.out_notation = out_notation
-        self.row_wrap = row_wrap
-        self.step_x = step_x
-        self.step_y = step_y
-        self.width = width
-        self.height = height
+        
+        # Use provided config or default
+        if config is None:
+            config = DEFAULT_CONFIG.diagram
+        self.config = config
+        
+        # Use provided model or default
+        if model is None:
+            model = DEFAULT_MODEL
+        self.model = model
+        
+        # Extract configurations and models for convenience
+        self.layout = config.layout
+        self.xml = model.xml
+        self.uml = model.uml
 
     @staticmethod
-    def kind_to_node_type(kind: str) -> str:
+    def kind_to_node_type(kind: str, uml_model: UmlModel) -> str:
+        """Convert element kind to UML node type using configuration."""
         if kind == "enum":
             return "Enumeration"
         if kind in ("datatype", "typedef"):
@@ -26,31 +38,40 @@ class NotationWriter:
         return "Class"
 
     def write(self):
-        NSMAP_LOCAL = {
-            "notation": "http://www.eclipse.org/papyrus/notation/1.0",
-            "xmi": "http://www.omg.org/XMI"
-        }
+        """Write notation file using configuration-based approach."""
+        # Use configuration for namespaces
         root_attrs = {
-            f"{{{XMI_NS}}}version": "2.0",
-            f"{{{XMI_NS}}}id": stable_id("notation"),
-            "name": "ClassDiagram"
+            self.xml.xmi_version: self.config.diagram_version,
+            self.xml.xmi_id: stable_id("notation"),
+            "name": self.config.diagram_name
         }
-        diagram_el = etree.Element(f"{{{NSMAP_LOCAL['notation']}}}Diagram", nsmap=NSMAP_LOCAL, attrib=root_attrs)
+        
+        diagram_el = etree.Element(
+            f"{{{self.xml.notation_ns}}}Diagram", 
+            nsmap=self.xml.notation_nsmap, 
+            attrib=root_attrs
+        )
 
         idx = 0
         for key, info in self.created.items():
-            x = 40 + (idx % self.row_wrap) * self.step_x
-            y = 40 + (idx // self.row_wrap) * self.step_y
-            node_type = self.kind_to_node_type(info.get("kind", "class"))
+            # Use layout configuration to calculate position
+            x, y = self.layout.calculate_position(idx)
+            
+            node_type = self.kind_to_node_type(
+                info.get("kind", "class"), 
+                self.uml
+            )
+            
             node_attrs = {
                 "type": node_type,
-                f"{{{XMI_NS}}}id": stable_id(info["xmi"] + ":node"),
+                self.xml.xmi_id: stable_id(info["xmi"] + ":node"),
                 "elementRef": info["xmi"],
                 "x": str(x),
                 "y": str(y),
-                "width": str(self.width),
-                "height": str(self.height)
+                "width": str(self.layout.width),
+                "height": str(self.layout.height)
             }
+            
             etree.SubElement(diagram_el, "children", attrib=node_attrs)
             idx += 1
 

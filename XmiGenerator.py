@@ -3,7 +3,7 @@ from lxml import etree
 
 from UmlModel import UmlModel
 from Utils import stable_id, xml_text
-from XmiCommon import *
+from Model import UmlModel as UmlModelConfig, DEFAULT_MODEL
 from XmiWriter import XmiWriter
 
 # -------------------- Visitor Pattern Implementation --------------------
@@ -45,7 +45,9 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
         xmi = info["xmi"]
         is_abstract = bool(info.get("clang", {}).get("is_abstract", False))
         
-        self.writer.start_packaged_element(xmi, "uml:Class", name, is_abstract=is_abstract)
+        # Use UML model for element type
+        uml_model = DEFAULT_MODEL.uml
+        self.writer.start_packaged_element(xmi, uml_model.class_type, name, is_abstract=is_abstract)
         
         for m in info.get("members", []):
             aid = stable_id(xmi + ":attr:" + m["name"])
@@ -84,7 +86,9 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
         xmi = info["xmi"]
         is_abstract = bool(info.get("clang", {}).get("is_abstract", False))
         
-        self.writer.start_packaged_element(xmi, "Enumeration", name, is_abstract=is_abstract)
+        # Use UML model for element type
+        uml_model = DEFAULT_MODEL.uml
+        self.writer.start_packaged_element(xmi, uml_model.enum_type, name, is_abstract=is_abstract)
         for lit in info.get("literals", []):
             self.writer.write_literal(stable_id(xmi + ":lit:" + lit), lit)
         self.writer.end_packaged_element()
@@ -95,7 +99,10 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
         is_abstract = bool(info.get("clang", {}).get("is_abstract", False))
         # Stubs are named with their full type string
         q_name = next((k for k, v in self.name_to_xmi.items() if v == xmi), name)
-        self.writer.start_packaged_element(xmi, "DataType", q_name, is_abstract=is_abstract)
+        
+        # Use UML model for element type
+        uml_model = DEFAULT_MODEL.uml
+        self.writer.start_packaged_element(xmi, uml_model.datatype_type, q_name, is_abstract=is_abstract)
         self.writer.end_packaged_element()
 
     def visit_typedef(self, info: Dict[str, Any]):
@@ -103,7 +110,9 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
         xmi = info["xmi"]
         is_abstract = bool(info.get("clang", {}).get("is_abstract", False))
         
-        self.writer.start_packaged_element(xmi, "DataType", name, is_abstract=is_abstract)
+        # Use UML model for element type
+        uml_model = DEFAULT_MODEL.uml
+        self.writer.start_packaged_element(xmi, uml_model.datatype_type, name, is_abstract=is_abstract)
         if info.get("underlying"):
             tref = self.name_to_xmi.get(info["underlying"])
             if tref:
@@ -191,7 +200,7 @@ class XmiGenerator:
 
         # Step 4: Write the document
         with etree.xmlfile(out_path, encoding="utf-8") as xf:
-            writer = XmiWriter(xf)
+            writer = XmiWriter(xf, xml_model=DEFAULT_MODEL.xml)
             writer.start_doc(project_name, model_id="model_1")
             
             visitor = UmlXmiWritingVisitor(writer, self.name_to_xmi)
@@ -207,7 +216,7 @@ class XmiGenerator:
             
             # Associations, Dependencies, and Generalizations are written at the root level
             for assoc in self.model.associations:
-                writer.write_association(assoc)
+                writer.write_association(assoc, uml_model=DEFAULT_MODEL.uml)
 
             for owner_q_name, typ in self.model.dependencies:
                 client_info = self.created.get(owner_q_name)
@@ -217,12 +226,19 @@ class XmiGenerator:
                 
                 if client_id and supplier_id:
                     dep_id = stable_id(f"dep:{owner_q_name}:{typ}")
+                    
+                    # Use model for dependency attributes
+                    uml_model = DEFAULT_MODEL.uml
+                    xml_model = DEFAULT_MODEL.xml
+                    
                     attribs = {
-                        XMI_TYPE: "uml:Dependency", XMI_ID: dep_id,
+                        xml_model.xmi_type: "uml:Dependency", 
+                        xml_model.xmi_id: dep_id,
                         "name": f"dep_{xml_text(owner_q_name)}_to_{xml_text(typ)}",
-                        "client": client_id, "supplier": supplier_id
+                        "client": client_id, 
+                        "supplier": supplier_id
                     }
-                    dep_el = etree.Element("packagedElement", attrib=attribs, nsmap=NSMAP)
+                    dep_el = etree.Element("packagedElement", attrib=attribs, nsmap=xml_model.uml_nsmap)
                     xf.write(dep_el)
 
             for child_id, parent_id in getattr(self.model, "generalizations", []) or []:
