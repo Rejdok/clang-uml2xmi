@@ -3,6 +3,7 @@ from lxml import etree
 
 from Utils import stable_id, xml_text
 from Model import XmlModel, UmlModel, DEFAULT_MODEL
+from UmlModel import UmlAssociation
 
 class XmiWriter:
     def __init__(self, xf: etree.xmlfile, xml_model: XmlModel = None):
@@ -60,6 +61,21 @@ class XmiWriter:
         ctx = self._ctx_stack.pop()
         ctx.__exit__(None, None, None)
 
+    def start_package(self, package_id: str, name: str):
+        """Start a package element."""
+        ctx = self.xf.element("packagedElement", nsmap=self.config.uml_nsmap, **{
+            self.config.xmi_type: "uml:Package",
+            self.config.xmi_id: package_id,
+            "name": xml_text(name)
+        })
+        ctx.__enter__()
+        self._ctx_stack.append(ctx)
+
+    def end_package(self):
+        """End a package element."""
+        ctx = self._ctx_stack.pop()
+        ctx.__exit__(None, None, None)
+
     def write_owned_attribute(self, aid: str, name: str, visibility: str="private", type_ref: Optional[str]=None, is_static: bool=False):
         # NOTE: use attribute `type` to reference the classifier by xmi:id
         attrs = {self.config.xmi_id: aid, "name": xml_text(name), "visibility": xml_text(visibility)}
@@ -108,26 +124,26 @@ class XmiWriter:
         el = etree.Element("generalization", attrib={self.config.xmi_id: gid, "general": general_ref}, nsmap=self.config.uml_nsmap)
         self.xf.write(el)
 
-    def write_association(self, assoc: Dict[str, Any], uml_model: UmlModel = None):
+    def write_association(self, assoc: UmlAssociation, uml_model: UmlModel = None):
         # Get UML model for type information
         if uml_model is None:
             uml_model = DEFAULT_MODEL.uml
         
         # Prefer precomputed stable ids (set earlier in XmiGenerator.write)
-        aid = assoc.get('_assoc_id') or stable_id(f"assoc:{assoc['src']}:{assoc['tgt']}:{assoc.get('name','')}")
+        aid = assoc._assoc_id or stable_id(f"assoc:{assoc.src}:{assoc.tgt}:{assoc.name}")
         assoc_el = etree.Element(
             "packagedElement",
             attrib={
                 self.config.xmi_type: uml_model.association_type,
                 self.config.xmi_id: aid,
-                "name": xml_text(assoc.get("name") or "")
+                "name": xml_text(assoc.name or "")
             },
             nsmap=self.config.uml_nsmap
         )
 
         # compute end ids (use precomputed if available)
-        end1_id = assoc.get('_end1_id') or stable_id(aid + ":end1")
-        end2_id = assoc.get('_end2_id') or stable_id(aid + ":end2")
+        end1_id = assoc._end1_id or stable_id(aid + ":end1")
+        end2_id = assoc._end2_id or stable_id(aid + ":end2")
 
         def add_bound_value(parent, tag, value):
             """Добавляет lowerValue/upperValue с правильным xmi:type используя модель."""
@@ -153,8 +169,8 @@ class XmiWriter:
             assoc_el, "ownedEnd",
             attrib={
                 self.config.xmi_id: end1_id, 
-                "type": assoc["src"], 
-                "aggregation": assoc.get("aggregation", uml_model.default_aggregation)
+                "type": assoc.src, 
+                "aggregation": assoc.aggregation.value
             },
             nsmap=self.config.uml_nsmap
         )
@@ -167,12 +183,12 @@ class XmiWriter:
             assoc_el, "ownedEnd",
             attrib={
                 self.config.xmi_id: end2_id, 
-                "type": assoc["tgt"], 
-                "aggregation": assoc.get("aggregation", uml_model.default_aggregation)
+                "type": assoc.tgt, 
+                "aggregation": uml_model.default_aggregation
             },
             nsmap=self.config.uml_nsmap
         )
-        if assoc.get("multiplicity") == uml_model.unlimited_multiplicity:
+        if assoc.multiplicity == uml_model.unlimited_multiplicity:
             add_bound_value(end2, "lowerValue", "0")
             add_bound_value(end2, "upperValue", uml_model.unlimited_multiplicity)
         else:

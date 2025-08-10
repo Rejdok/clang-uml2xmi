@@ -6,9 +6,10 @@ from Config import LayoutConfig, DiagramConfig, DEFAULT_CONFIG
 from Model import DiagramModel, UmlModel, DEFAULT_MODEL
 from Utils import stable_id
 from lxml import etree
+from UmlModel import UmlElement, ElementKind
 
 class NotationWriter:
-    def __init__(self, created: Dict[str, Any], out_notation: str, 
+    def __init__(self, created: Dict[str, UmlElement], out_notation: str, 
                  config: DiagramConfig = None, model: DiagramModel = None):
         self.created = created
         self.out_notation = out_notation
@@ -29,11 +30,11 @@ class NotationWriter:
         self.uml = model.uml
 
     @staticmethod
-    def kind_to_node_type(kind: str, uml_model: UmlModel) -> str:
+    def kind_to_node_type(kind: ElementKind, uml_model: UmlModel) -> str:
         """Convert element kind to UML node type using configuration."""
-        if kind == "enum":
+        if kind == ElementKind.ENUM:
             return "Enumeration"
-        if kind in ("datatype", "typedef"):
+        if kind in (ElementKind.DATATYPE, ElementKind.TYPEDEF):
             return "DataType"
         return "Class"
 
@@ -57,15 +58,12 @@ class NotationWriter:
             # Use layout configuration to calculate position
             x, y = self.layout.calculate_position(idx)
             
-            node_type = self.kind_to_node_type(
-                info.get("kind", "class"), 
-                self.uml
-            )
+            node_type = self.kind_to_node_type(info.kind, self.uml)
             
             node_attrs = {
                 "type": node_type,
-                self.xml.xmi_id: stable_id(info["xmi"] + ":node"),
-                "elementRef": info["xmi"],
+                self.xml.xmi_id: stable_id(info.xmi + ":node"),
+                "elementRef": info.xmi,
                 "x": str(x),
                 "y": str(y),
                 "width": str(self.layout.width),

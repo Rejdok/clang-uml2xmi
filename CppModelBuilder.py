@@ -1,23 +1,69 @@
 
 
 # ---------- Model builder (parser + initial analysis) ----------
-from typing import Dict, Any, List,Tuple
+from typing import Dict, Any, List, Tuple, Set
 from CppParser import CppTypeParser
 from Utils import xid
+from UmlModel import UmlElement, UmlMember, UmlAssociation, ClangMetadata, ElementKind, Visibility, AggregationType
 
 class CppModelBuilder:
-    def __init__(self, j: Dict[str,Any]):
+    def __init__(self, j: Dict[str, Any]):
         self.j = j
         # mapping from chosen name (fallback) to xmi id
-        self.name_to_xmi: Dict[str,str] = {}
+        self.name_to_xmi: Dict[str, str] = {}
         # internal store of created element metadata
-        self.created: Dict[str, Dict[str,Any]] = {}
-        self.associations: List[Dict[str,Any]] = []
-        self.dependencies: List[Tuple[str,str]] = []
+        self.created: Dict[str, UmlElement] = {}
+        self.associations: List[UmlAssociation] = []
+        self.dependencies: List[Tuple[str, str]] = []
 
     @staticmethod
-    def choose_name(el: Dict[str,Any]) -> str:
+    def choose_name(el: Dict[str, Any]) -> str:
         return el.get("qualified_name") or el.get("display_name") or el.get("name") or el.get("id") or xid()
+
+    def _create_clang_metadata(self, el: Dict[str, Any]) -> ClangMetadata:
+        """Create ClangMetadata from raw clang data."""
+        return ClangMetadata(
+            is_abstract=bool(el.get("is_abstract", False)),
+            is_enum=bool(el.get("is_enum", False)),
+            is_typedef=bool(el.get("is_typedef", False) or el.get("is_alias", False)),
+            is_interface=bool(el.get("is_interface", False)),
+            is_struct=bool(el.get("is_struct", False) or el.get("is_datatype", False)),
+            is_datatype=bool(el.get("is_datatype", False)),
+            qualified_name=el.get("qualified_name"),
+            display_name=el.get("display_name"),
+            name=el.get("name"),
+            type=el.get("type"),
+            kind=el.get("kind")
+        )
+
+    def _create_uml_member(self, m: Dict[str, Any]) -> UmlMember:
+        """Create UmlMember from raw member data."""
+        mname = m.get("display_name") or m.get("name") or m.get("id") or ""
+        visibility_str = m.get("access") or m.get("visibility") or "private"
+        visibility = Visibility(visibility_str) if visibility_str in [v.value for v in Visibility] else Visibility.PRIVATE
+        is_static = bool(m.get("is_static") or m.get("static") or False)
+        mtypeobj = m.get("type") or m.get("type_info") or {}
+        tname = CppTypeParser.safe_type_name(mtypeobj) or m.get("type_name") or m.get("type")
+        return UmlMember(
+            name=mname,
+            type_repr=tname,
+            visibility=visibility,
+            is_static=is_static
+        )
+
+    def _get_element_kind(self, el: Dict[str, Any]) -> ElementKind:
+        """Determine ElementKind from clang data."""
+        kind_raw = (el.get("type") or el.get("kind") or "").lower()
+        if "enum" in kind_raw or el.get("is_enum"):
+            return ElementKind.ENUM
+        elif "typedef" in kind_raw or el.get("is_typedef") or el.get("is_alias"):
+            return ElementKind.TYPEDEF
+        elif "interface" in kind_raw or el.get("is_interface"):
+            return ElementKind.INTERFACE
+        elif "struct" in kind_raw or el.get("is_struct") or el.get("is_datatype"):
+            return ElementKind.DATATYPE
+        else:
+            return ElementKind.CLASS
 
     def prepare(self):
         elements = self.j.get("elements") or self.j.get("entities") or self.j.get("types") or []
@@ -25,18 +71,25 @@ class CppModelBuilder:
             if not isinstance(el, dict):
                 continue
             chosen = self.choose_name(el)
-            u_kind = "class"
-            kind_raw = (el.get("type") or el.get("kind") or "").lower()
-            if "enum" in kind_raw or el.get("is_enum"):
-                u_kind = "enum"
-            elif "typedef" in kind_raw or el.get("is_typedef") or el.get("is_alias"):
-                u_kind = "typedef"
-            elif "interface" in kind_raw or el.get("is_interface"):
-                u_kind = "interface"
-            elif "struct" in kind_raw or el.get("is_struct") or el.get("is_datatype"):
-                u_kind = "datatype"
+            kind = self._get_element_kind(el)
             xmi = xid()
-            self.created[chosen] = {"xmi": xmi, "name": chosen, "kind": u_kind, "clang": el}
+            
+            # Create ClangMetadata
+            clang_meta = self._create_clang_metadata(el)
+            
+            # Create UmlElement with empty members and used_types for now
+            uml_element = UmlElement(
+                xmi=xmi,
+                name=chosen,
+                kind=kind,
+                members=[],
+                clang=clang_meta,
+                used_types=set(),
+                underlying=None,
+                original_data=el  # Store original raw data
+            )
+            
+            self.created[chosen] = uml_element
             self.name_to_xmi[chosen] = xmi
 
     def build(self):
@@ -46,63 +99,67 @@ class CppModelBuilder:
 
         # second pass: collect members, operations, templates, typedef underlying, associations
         for name, info in list(self.created.items()):
-            el = info["clang"]
-            kind = info["kind"]
+            # Use original data instead of clang metadata for dictionary access
+            el = info.original_data
+            kind = info.kind
 
             # templates
             templates = el.get("templates") or el.get("template_parameters") or el.get("template_args") or []
             if templates:
-                info["templates"] = []
+                info.templates = []
                 for t in templates:
                     if isinstance(t, dict):
                         tname = t.get("name") or t.get("display_name") or t.get("type") or "T"
                     else:
                         tname = str(t)
-                    info["templates"].append(tname)
+                    info.templates.append(tname)
             else:
-                base, args = CppTypeParser.parse_template_args(info["name"])
+                base, args = CppTypeParser.parse_template_args(info.name)
                 if args:
-                    info["templates"] = args
-                    info["name"] = base
+                    info.templates = args
+                    info.name = base
 
-            if kind == "enum":
+            if kind == ElementKind.ENUM:
                 enumerators = el.get("enumerators") or el.get("values") or el.get("literals") or []
-                info["literals"] = []
+                info.literals = []
                 for lit in enumerators:
                     if isinstance(lit, dict):
                         lname = lit.get("name") or lit.get("value") or str(lit)
                     else:
                         lname = str(lit)
-                    info["literals"].append(lname)
+                    info.literals.append(lname)
                 continue
 
-            if kind == "typedef":
+            if kind == ElementKind.TYPEDEF:
                 underlying = el.get("underlying_type") or el.get("type") or el.get("alias_of") or {}
                 ustr = None
                 if isinstance(underlying, dict):
                     ustr = underlying.get("name") or underlying.get("display_name")
                 elif isinstance(underlying, str):
                     ustr = underlying
-                info["underlying"] = ustr
+                info.underlying = ustr
                 continue
 
             # members
             members = el.get("members") or el.get("fields") or el.get("variables") or []
-            info["members"] = []
+            info.members = []
             for m in members:
                 if isinstance(m, dict):
-                    mname = m.get("display_name") or m.get("name") or m.get("id") or ""
-                    visibility = m.get("access") or m.get("visibility") or "private"
-                    is_static = bool(m.get("is_static") or m.get("static") or False)
-                    mtypeobj = m.get("type") or m.get("type_info") or {}
-                    tname = CppTypeParser.safe_type_name(mtypeobj) or m.get("type_name") or m.get("type")
-                    info["members"].append({"name": mname, "visibility": visibility, "is_static": is_static, "type_repr": tname})
+                    uml_member = self._create_uml_member(m)
+                    info.members.append(uml_member)
                 else:
-                    info["members"].append({"name": str(m), "visibility": "private", "is_static": False, "type_repr": None})
+                    # Create simple member for non-dict data
+                    simple_member = UmlMember(
+                        name=str(m),
+                        type_repr=None,
+                        visibility=Visibility.PRIVATE,
+                        is_static=False
+                    )
+                    info.members.append(simple_member)
 
             # operations
             operations = el.get("methods") or el.get("functions") or el.get("operations") or []
-            info["operations"] = []
+            info.operations = []
             for op in operations:
                 opname = op.get("display_name") or op.get("name") or op.get("signature") or "op"
                 visibility = op.get("access") or op.get("visibility") or "public"
@@ -117,19 +174,19 @@ class CppModelBuilder:
                     pdefault = p.get("default_value") or p.get("default") or None
                     param_list.append({"name": pname, "type": ptype, "direction": pdir, "default": pdefault})
                 rt = CppTypeParser.safe_type_name(op.get("return_type")) or CppTypeParser.safe_type_name(op.get("type")) or CppTypeParser.safe_type_name(op.get("returnType"))
-                info["operations"].append({"name": opname, "visibility": visibility, "is_static": is_static, "is_abstract": is_abstract, "params": param_list, "return": rt})
+                info.operations.append({"name": opname, "visibility": visibility, "is_static": is_static, "is_abstract": is_abstract, "params": param_list, "return": rt})
                 if rt:
-                    info.setdefault("used_types", set()).add(rt)
+                    info.used_types.add(rt)
                 for p in param_list:
                     if p.get("type"):
-                        info.setdefault("used_types", set()).add(p["type"])
+                        info.used_types.add(p["type"])
 
         # associations: for each member try to match known types
         for name, info in self.created.items():
-            owner_xmi = info["xmi"]
-            raws = info.get("members") or []
+            owner_xmi = info.xmi
+            raws = info.members
             for m in raws:
-                type_repr = m.get("type_repr")
+                type_repr = m.type_repr
                 if not type_repr:
                     continue
                 parsed = CppTypeParser.extract_all_type_identifiers(type_repr)
@@ -144,21 +201,36 @@ class CppModelBuilder:
                         continue
                     # heuristic aggregation
                     if is_smart:
-                        aggregation = "composite" if "unique" in outer_base or "unique_ptr" in outer_base else "shared"
+                        aggregation_str = "composite" if "unique" in outer_base or "unique_ptr" in outer_base else "shared"
                         # UML uses 'shared' not standard; keep 'none' or 'composite'
-                        if aggregation not in ("composite", "shared"):
-                            aggregation = "none"
+                        if aggregation_str not in ("composite", "shared"):
+                            aggregation_str = "none"
                     else:
                         if an["is_pointer"] or an["is_reference"] or an["is_rref"]:
-                            aggregation = "shared"
+                            aggregation_str = "shared"
                         else:
-                            aggregation = "none"
+                            aggregation_str = "none"
+                    
+                    # Convert string to AggregationType enum
+                    try:
+                        aggregation = AggregationType(aggregation_str)
+                    except ValueError:
+                        aggregation = AggregationType.NONE
+                    
                     mult = "*" if is_container or an["is_array"] else "1"
-                    self.associations.append({"src": owner_xmi, "tgt": tgt_xmi, "aggregation": aggregation, "multiplicity": mult, "name": m.get("name","")})
+                    
+                    association = UmlAssociation(
+                        src=owner_xmi,
+                        tgt=tgt_xmi,
+                        aggregation=aggregation,
+                        multiplicity=mult,
+                        name=m.name
+                    )
+                    self.associations.append(association)
 
         # dependencies: types used but unknown
         for name, info in self.created.items():
-            used = info.get("used_types") or set()
+            used = info.used_types or set()
             for typename in used:
                 if not typename:
                     continue
@@ -171,7 +243,7 @@ class CppModelBuilder:
                 if cand:
                     # already accounted as association maybe; otherwise add dependency to first match
                     continue
-                self.dependencies.append((info["name"], typename))
+                self.dependencies.append((info.name, typename))
 
         # expose project_name + created + lists
         project_name = self.j.get("project_name") or self.j.get("project") or "clang_uml_model"
