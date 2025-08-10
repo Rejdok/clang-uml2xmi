@@ -1,23 +1,28 @@
 
 import re
-from typing import *
+from typing import Dict, List, Optional, Tuple, Any, Union, Literal
+
+from uml_types import (
+    TypeToken, TypeAnalysis, TypeAnalysisResult,
+    TypeString, TemplateArgs, TypeName
+)
 
 class CppTypeParser:
-    _CONTAINER_KEYWORDS = {"vector", "list", "deque", "set", "unordered_set", "map", "unordered_map", "array", "span", "tuple"}
-    _SMART_PTRS = {"unique_ptr", "shared_ptr", "weak_ptr", "scoped_ptr", "intrusive_ptr"}
+    _CONTAINER_KEYWORDS: frozenset[str] = frozenset({"vector", "list", "deque", "set", "unordered_set", "map", "unordered_map", "array", "span", "tuple"})
+    _SMART_PTRS: frozenset[str] = frozenset({"unique_ptr", "shared_ptr", "weak_ptr", "scoped_ptr", "intrusive_ptr"})
 
     @staticmethod
-    def safe_type_name(t) -> Optional[str]:
+    def safe_type_name(t: Union[None, str, Dict[str, Any]]) -> Optional[str]:
         if not t:
             return None
         if isinstance(t, str):
-            s = t.strip()
+            s: str = t.strip()
             return s if s else None
         if isinstance(t, dict):
             for k in ("qualified_name", "qualifiedName", "display_name", "displayName", "name", "type"):
                 if k in t and t[k]:
                     return str(t[k])
-            inner = t.get("type")
+            inner: Any = t.get("type")
             if isinstance(inner, dict):
                 return inner.get("name") or inner.get("display_name")
         return None
@@ -31,21 +36,21 @@ class CppTypeParser:
 
     @staticmethod
     def parse_template_args(type_str: str) -> Tuple[str, List[str]]:
-        s = (type_str or "").strip()
+        s: str = (type_str or "").strip()
         if not s:
             return (s, [])
-        depth = 0
-        i = 0
-        n = len(s)
+        depth: int = 0
+        i: int = 0
+        n: int = len(s)
         while i < n:
             if s[i] == '<':
-                outer = s[:i].strip()
+                outer: str = s[:i].strip()
                 i += 1
-                cur = ''
+                cur: str = ''
                 depth = 1
-                args = []
+                args: List[str] = []
                 while i < n and depth > 0:
-                    c = s[i]
+                    c: str = s[i]
                     if c == '<':
                         depth += 1
                         cur += c
@@ -68,9 +73,11 @@ class CppTypeParser:
         return (s, [])
 
     @classmethod
-    def extract_all_type_identifiers(cls, type_str: Optional[str]) -> List[Dict[str,str]]:
-        out = []
-        s = cls.tokenize_type(type_str)
+    def extract_all_type_identifiers(cls, type_str: Optional[str]) -> List[TypeToken]:
+        out: List[TypeToken] = []
+        s: str = cls.tokenize_type(type_str)
+        outer: str
+        args: List[str]
         outer, args = cls.parse_template_args(s)
         if outer:
             out.append({'name': outer, 'raw': outer})
@@ -79,22 +86,22 @@ class CppTypeParser:
         return out
 
     @staticmethod
-    def match_known_types_from_parsed(parsed_list: List[Dict[str,str]], known_names) -> List[str]:
-        matched = []
-        keys = list(known_names)
+    def match_known_types_from_parsed(parsed_list: List[TypeToken], known_names: Union[List[str], Tuple[str, ...], set[str]]) -> List[str]:
+        matched: List[str] = []
+        keys: List[str] = list(known_names)
         for item in parsed_list:
-            token = item.get('name') or ''
+            token: str = item.get('name') or ''
             if not token:
                 continue
-            candidates = [token]
+            candidates: List[str] = [token]
             if '::' in token:
                 candidates.append(token.split('::')[-1])
-            t = re.sub(r'<.*>$', '', token).strip()
+            t: str = re.sub(r'<.*>$', '', token).strip()
             if t != token:
                 candidates.append(t)
                 if '::' in t:
                     candidates.append(t.split('::')[-1])
-            found = None
+            found: Optional[str] = None
             for c in candidates:
                 for kn in keys:
                     if kn == c or kn.endswith("::" + c) or c.endswith("::" + kn):
@@ -105,9 +112,9 @@ class CppTypeParser:
         return matched
 
     @classmethod
-    def analyze_type_expr(cls, type_str: Optional[str]) -> Dict[str,Any]:
-        t = cls.tokenize_type(type_str)
-        result = {"raw": type_str, "base": t, "is_pointer": False, "is_reference": False, "is_rref": False, "is_array": False}
+    def analyze_type_expr(cls, type_str: Optional[str]) -> TypeAnalysis:
+        t: str = cls.tokenize_type(type_str)
+        result: TypeAnalysis = {"raw": type_str, "base": t, "is_pointer": False, "is_reference": False, "is_rref": False, "is_array": False}
         if not t:
             return result
         if re.search(r'\[\s*\]$', t) or re.search(r'\[\s*\d+\s*\]$', t):
@@ -118,8 +125,10 @@ class CppTypeParser:
             result["is_reference"] = True
         if '*' in t:
             result["is_pointer"] = True
-        clean = re.sub(r'(\s*[\*\&]+)|\b(const|volatile|mutable)\b', '', t).strip()
+        clean: str = re.sub(r'(\s*[\*\&]+)|\b(const|volatile|mutable)\b', '', t).strip()
         result["base"] = clean
+        outer: str
+        args: List[str]
         outer, args = cls.parse_template_args(clean)
         result["template_base"] = outer.split("::")[-1] if outer else outer
         result["template_args"] = args

@@ -5,82 +5,78 @@ Contains XMI and UML data models, not configuration.
 """
 
 from dataclasses import dataclass
-from typing import Dict, Any
+from typing import Dict, Any, Literal, Union
 from enum import Enum
 
-
-class AggregationType(Enum):
-    """Association aggregation types."""
-    NONE = "none"
-    SHARED = "shared"
-    COMPOSITE = "composite"
-
+from uml_types import (
+    Namespace, AttributeName, ElementType, MultiplicityValue,
+    AggregationType
+)
 
 @dataclass
 class XmlModel:
     """XML/XMI namespace and attribute model."""
     # Namespaces
-    xmi_ns: str = "http://www.omg.org/XMI"
-    uml_ns: str = "http://www.eclipse.org/uml2/5.0.0/UML"
-    notation_ns: str = "http://www.eclipse.org/papyrus/notation/1.0"
+    xmi_ns: Namespace = "http://www.omg.org/XMI"
+    uml_ns: Namespace = "http://www.eclipse.org/uml2/5.0.0/UML"
+    notation_ns: Namespace = "http://www.eclipse.org/papyrus/notation/1.0"
     
     # XMI attributes
     @property
-    def xmi_id(self) -> str:
+    def xmi_id(self) -> AttributeName:
         return f"{{{self.xmi_ns}}}id"
     
     @property
-    def xmi_idref(self) -> str:
+    def xmi_idref(self) -> AttributeName:
         return f"{{{self.xmi_ns}}}idref"
     
     @property
-    def xmi_type(self) -> str:
+    def xmi_type(self) -> AttributeName:
         return f"{{{self.xmi_ns}}}type"
     
     @property
-    def xmi_version(self) -> str:
+    def xmi_version(self) -> AttributeName:
         return f"{{{self.xmi_ns}}}version"
     
     # Namespace maps
     @property
-    def uml_nsmap(self) -> Dict[str, str]:
+    def uml_nsmap(self) -> Dict[str, Namespace]:
         return {
             "xmi": self.xmi_ns,
             "uml": self.uml_ns
         }
     
     @property
-    def notation_nsmap(self) -> Dict[str, str]:
+    def notation_nsmap(self) -> Dict[str, Namespace]:
         return {
             "notation": self.notation_ns,
             "xmi": self.xmi_ns
         }
 
-
 @dataclass
 class UmlModel:
     """UML-specific model structures."""
     # Element types
-    class_type: str = "uml:Class"
-    enum_type: str = "uml:Enumeration"
-    datatype_type: str = "uml:DataType"
-    association_type: str = "uml:Association"
+    class_type: ElementType = "uml:Class"
+    enum_type: ElementType = "uml:Enumeration"
+    datatype_type: ElementType = "uml:DataType"
+    association_type: ElementType = "uml:Association"
     
     # Literal types
-    literal_integer_type: str = "uml:LiteralInteger"
-    literal_unlimited_natural_type: str = "uml:LiteralUnlimitedNatural"
+    literal_integer_type: ElementType = "uml:LiteralInteger"
+    literal_unlimited_natural_type: ElementType = "uml:LiteralUnlimitedNatural"
     
     # Default values
-    default_multiplicity_lower: str = "1"
-    default_multiplicity_upper: str = "1"
-    unlimited_multiplicity: str = "*"
+    default_multiplicity_lower: MultiplicityValue = "1"
+    default_multiplicity_upper: MultiplicityValue = "1"
+    unlimited_multiplicity: MultiplicityValue = "*"
     
     # Aggregation defaults
     default_aggregation: str = AggregationType.NONE.value
     
-    def get_element_type(self, kind: str) -> str:
+    def get_element_type(self, kind: str) -> ElementType:
         """Get UML type string for given element kind."""
-        type_mapping = {
+        type_mapping: Dict[str, ElementType] = {
             "class": self.class_type,
             "enum": self.enum_type,
             "datatype": self.datatype_type,

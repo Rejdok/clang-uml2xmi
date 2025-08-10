@@ -18,7 +18,7 @@ import sys, re, uuid, hashlib, json
 from dataclasses import dataclass
 
 from CppModelBuilder import CppModelBuilder
-from UmlModel import UmlModel
+from UmlModel import UmlModel, ElementName, XmiId
 from XmiGenerator import XmiGenerator
 from NotationWriter import NotationWriter
 from Config import GeneratorConfig, DEFAULT_CONFIG
@@ -57,11 +57,14 @@ class Cpp2UmlApp:
         prep = builder.build()
 
         # Build UmlModel structure
+        # Convert name-based elements to XMI ID-based elements
+        elements_by_xmi = {elem.xmi: elem for elem in prep["created"].values()}
+        
         model = UmlModel(
-            elements=prep["created"],
+            elements=elements_by_xmi,
             associations=prep["associations"],
             dependencies=prep["dependencies"],
-            generalizations=[],  # kept empty — builder doesn't produce explicit generalizations list
+            generalizations=prep.get("generalizations", []),  # Use generalizations from builder
             name_to_xmi=prep["name_to_xmi"]
         )
 

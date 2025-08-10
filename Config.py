@@ -8,28 +8,9 @@ from dataclasses import dataclass
 from typing import Dict, Any, Optional
 from enum import Enum
 
-
-class Visibility(Enum):
-    """UML visibility modifiers."""
-    PUBLIC = "public"
-    PRIVATE = "private"
-    PROTECTED = "protected"
-    PACKAGE = "package"
-
-
-class Direction(Enum):
-    """Parameter direction modifiers."""
-    IN = "in"
-    OUT = "out"
-    INOUT = "inout"
-    RETURN = "return"
-
-
-class AggregationType(Enum):
-    """Association aggregation types."""
-    NONE = "none"
-    SHARED = "shared"
-    COMPOSITE = "composite"
+# Import enums from UmlModel to avoid duplication
+from UmlModel import Visibility, AggregationType
+from uml_types import Direction
 
 
 @dataclass
