@@ -72,6 +72,25 @@ class CppTypeParser:
             i += 1
         return (s, [])
 
+    @staticmethod
+    def extract_template_base(type_str: str) -> str:
+        """Extract the base template name without arguments."""
+        base, _ = CppTypeParser.parse_template_args(type_str)
+        return base
+
+    @staticmethod
+    def is_template_instance(type_str: str) -> bool:
+        """Check if a type string represents a template instance."""
+        return '<' in type_str and '>' in type_str
+
+    @staticmethod
+    def normalize_template_name(type_str: str) -> str:
+        """Normalize template name by removing template arguments for comparison."""
+        base, args = CppTypeParser.parse_template_args(type_str)
+        if args:
+            return f"{base}<...>"
+        return base
+
     @classmethod
     def extract_all_type_identifiers(cls, type_str: Optional[str]) -> List[TypeToken]:
         out: List[TypeToken] = []

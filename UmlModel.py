@@ -3,7 +3,7 @@ from typing import List, Optional, Dict, Tuple, Union
 from uml_types import (
     XmiId, ElementName, TypeName, Multiplicity, 
     ElementKind, Visibility, AggregationType,
-    TypedList, TypedDict
+    TypedList, TypedDict, Namespace
 )
 
 # ---------- Member structure ----------
@@ -56,6 +56,7 @@ class UmlElement:
     operations: List[UmlOperation] = None  # List of UmlOperation objects
     templates: List[str] = None  # List of template parameter names
     literals: List[str] = None  # List of enum literal names
+    namespace: Optional[str] = None  # Namespace for this element
     original_data: Optional[Dict[str, Union[str, int, bool, List[str]]]] = None  # Store original raw data with specific types
     
     def __post_init__(self):

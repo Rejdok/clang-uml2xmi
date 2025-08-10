@@ -123,6 +123,28 @@ class XmiWriter:
     def write_literal(self, lid: str, name: str) -> None:
         el: etree._Element = etree.Element("ownedLiteral", attrib={self.config.xmi_id: lid, "name": xml_text(name)}, nsmap=self.config.uml_nsmap)
         self.xf.write(el)
+    
+    def write_enum_literal(self, lid: str, name: str) -> None:
+        """Write an enum literal element."""
+        el: etree._Element = etree.Element("ownedLiteral", attrib={self.config.xmi_id: lid, "name": xml_text(name)}, nsmap=self.config.uml_nsmap)
+        self.xf.write(el)
+    
+    def write_operation_return_type(self, type_ref: XmiId) -> None:
+        """Write the return type for an operation."""
+        el: etree._Element = etree.Element("ownedParameter", attrib={
+            self.config.xmi_id: stable_id("return_param"),
+            "direction": "return",
+            "type": str(type_ref)
+        }, nsmap=self.config.uml_nsmap)
+        self.xf.write(el)
+    
+    def write_template_parameter(self, template_id: str, parameter_name: str) -> None:
+        """Write a template parameter element."""
+        el: etree._Element = etree.Element("ownedTemplateSignature", attrib={
+            self.config.xmi_id: template_id,
+            "name": xml_text(parameter_name)
+        }, nsmap=self.config.uml_nsmap)
+        self.xf.write(el)
 
     def write_generalization(self, gid: str, general_ref: XmiId, inheritance_type: str = "public", is_virtual: bool = False, is_final: bool = False) -> None:
         """Write generalization element with inheritance attributes.
