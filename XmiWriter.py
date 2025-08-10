@@ -19,6 +19,7 @@ class XmiWriter:
             **{"xmi:version": "2.1"}
         )
         xmi_ctx.__enter__()
+        self._ctx_stack.append(xmi_ctx)
 
         model_ctx = self.xf.element(
             f"{{{UML_NS}}}Model",
@@ -28,13 +29,13 @@ class XmiWriter:
             }
         )
         model_ctx.__enter__()
+        self._ctx_stack.append(model_ctx)
 
-        return (xmi_ctx, model_ctx)
-
-    def end_doc(self, ctx):
-        xmi_ctx, model_ctx = ctx
-        model_ctx.__exit__(None, None, None)
-        xmi_ctx.__exit__(None, None, None)
+    def end_doc(self):
+        # Pop and exit all remaining contexts
+        while self._ctx_stack:
+            ctx = self._ctx_stack.pop()
+            ctx.__exit__(None, None, None)
 
     def start_packaged_element(self, xmi_id: str, xmi_type: str, name: str,
                                is_abstract: bool=False, extra_attrs: Optional[Dict[str,str]] = None):
@@ -167,4 +168,3 @@ class XmiWriter:
 
     def write_packaged_element_raw(self, element: etree._Element):
         self.xf.write(element)
-
