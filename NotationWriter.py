@@ -1,5 +1,11 @@
 
 # ---------- Notation writer (Papyrus minimal) ----------
+from typing import Any, Dict
+
+from XmiCommon import *
+from Utils import stable_id
+from lxml import etree
+
 class NotationWriter:
     def __init__(self, created: Dict[str, Any], out_notation: str, row_wrap: int = 10,
                  step_x: int = 300, step_y: int = 200, width: int = 180, height: int = 100):

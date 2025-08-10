@@ -3,6 +3,7 @@
 # ---------- Model builder (parser + initial analysis) ----------
 from typing import Dict, Any, List,Tuple
 from CppParser import CppTypeParser
+from Utils import xid
 
 class CppModelBuilder:
     def __init__(self, j: Dict[str,Any]):

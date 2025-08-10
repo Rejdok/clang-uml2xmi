@@ -15,7 +15,7 @@ This file is a one-to-one edit of the provided script with the above fixes appli
 from typing import Optional, List, Dict, Any, Tuple
 import sys, re, uuid, hashlib, json
 from dataclasses import dataclass
-from lxml import etree
+
 from CppModelBuilder import CppModelBuilder
 from UmlModel import UmlModel
 from XmiGenerator import XmiGenerator

@@ -1,18 +1,10 @@
-# ---------- XMI writer ----------
-# Пространства имён XMI и UML
-XMI_NS = "http://www.omg.org/XMI"
-UML_NS = "http://www.eclipse.org/uml2/5.0.0/UML"
+from typing import Any, Dict, Optional
+from lxml import etree
 
-# Константы для корректных имён атрибутов
-XMI_ID = f"{{{XMI_NS}}}id"
-XMI_IDREF = f"{{{XMI_NS}}}idref"
-XMI_TYPE = f"{{{XMI_NS}}}type"
+from Utils import stable_id, xml_text
 
-# Карта пространств имён
-NSMAP = {
-    "xmi": XMI_NS,
-    "uml": UML_NS
-}
+from XmiCommon import *
+
 
 class XmiWriter:
     def __init__(self, xf: etree.xmlfile):
