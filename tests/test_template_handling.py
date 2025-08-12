@@ -4,7 +4,7 @@ Test file for improved template handling in CppModelBuilder.
 """
 
 import json
-from CppModelBuilder import CppModelBuilder
+from build.cpp.builder import CppModelBuilder
 from CppParser import CppTypeParser
 
 def test_template_parsing():
@@ -56,7 +56,7 @@ def test_template_matching():
     }
     
     builder = CppModelBuilder(mock_data)
-    builder.prepare()
+    # prepare is implicit in build
     
     # Test template matching
     test_types = [
@@ -98,7 +98,7 @@ def test_template_dependencies():
     }
     
     builder = CppModelBuilder(mock_data)
-    builder.prepare()
+    # prepare is implicit in build
     
     candidates = [(name, info) for name, info in builder.created.items()]
     
@@ -129,7 +129,7 @@ def test_inheritance_resolution():
     }
     
     builder = CppModelBuilder(mock_data)
-    builder.prepare()
+    # prepare is implicit in build
     result = builder.build()
     
     print(f"Generalizations: {len(result['generalizations'])}")

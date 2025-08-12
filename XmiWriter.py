@@ -4,6 +4,12 @@ from lxml import etree
 
 from Utils import stable_id, xml_text
 from Model import XmlModel, UmlModel, DEFAULT_MODEL
+try:
+    # Prefer new meta bundle if available
+    from meta import XmlMetaModel as NewXmlModel, UmlMetaModel as NewUmlModel, DEFAULT_META
+    _HAS_META = True
+except Exception:
+    _HAS_META = False
 from UmlModel import UmlAssociation, XmiId
 
 from uml_types import (
@@ -13,6 +19,11 @@ from uml_types import (
 
 # Setup logger
 logger = logging.getLogger(__name__)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter('%(levelname)s:%(name)s:%(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
 class XmiWriter:
     def __init__(self, xf: etree.xmlfile, xml_model: Optional[XmlModel] = None) -> None:
@@ -21,7 +32,11 @@ class XmiWriter:
         
         # Use provided model or default
         if xml_model is None:
-            xml_model = DEFAULT_MODEL.xml
+            # If new meta exists, use it; otherwise fallback to legacy Model.DEFAULT_MODEL
+            if _HAS_META:
+                xml_model = DEFAULT_META.xml  # type: ignore[assignment]
+            else:
+                xml_model = DEFAULT_MODEL.xml
         self.config: XmlModel = xml_model
 
     def start_doc(self, model_name: str, model_id: str = "model_1") -> None:
@@ -233,27 +248,46 @@ class XmiWriter:
 
     def write_template_binding(self, binding_id: str, signature_ref: XmiId, arg_ids: List[XmiId]) -> None:
         """Write templateBinding with parameterSubstitution entries as a child of current element."""
-        binding_el = etree.Element("templateBinding", nsmap=self.config.uml_nsmap, **{
-            self.config.xmi_id: binding_id,
-            self.config.xmi_type: "uml:TemplateBinding",
-        })
-        # reference to template signature
-        etree.SubElement(binding_el, "signature", nsmap=self.config.uml_nsmap, **{
-            self.config.xmi_idref: str(signature_ref)
-        })
-        # substitutions
-        for i, aid in enumerate(arg_ids):
-            sub_el = etree.SubElement(binding_el, "parameterSubstitution", nsmap=self.config.uml_nsmap, **{
-                self.config.xmi_id: stable_id(binding_id + f":sub:{i}")
-            })
-            etree.SubElement(sub_el, "actual", nsmap=self.config.uml_nsmap, **{
-                self.config.xmi_idref: str(aid)
-            })
-        # Attach to current context if available; otherwise write at top-level
-        if self._ctx_stack:
-            self._ctx_stack[-1].append(binding_el)
-        else:
-            self.xf.write(binding_el)
+        # Nest within current open packagedElement using xmlfile contexts
+        tb_ctx = self.xf.element(
+            "templateBinding",
+            nsmap=self.config.uml_nsmap,
+            **{
+                self.config.xmi_id: binding_id,
+                self.config.xmi_type: "uml:TemplateBinding",
+            },
+        )
+        tb_ctx.__enter__()
+        try:
+            # signature reference
+            sig_ctx = self.xf.element(
+                "signature",
+                nsmap=self.config.uml_nsmap,
+                **{self.config.xmi_idref: str(signature_ref)},
+            )
+            sig_ctx.__enter__()
+            sig_ctx.__exit__(None, None, None)
+
+            # substitutions
+            for i, aid in enumerate(arg_ids):
+                ps_ctx = self.xf.element(
+                    "parameterSubstitution",
+                    nsmap=self.config.uml_nsmap,
+                    **{self.config.xmi_id: stable_id(binding_id + f":sub:{i}")},
+                )
+                ps_ctx.__enter__()
+                try:
+                    actual_ctx = self.xf.element(
+                        "actual",
+                        nsmap=self.config.uml_nsmap,
+                        **{self.config.xmi_idref: str(aid)},
+                    )
+                    actual_ctx.__enter__()
+                    actual_ctx.__exit__(None, None, None)
+                finally:
+                    ps_ctx.__exit__(None, None, None)
+        finally:
+            tb_ctx.__exit__(None, None, None)
 
     def write_generalization(self, gid: str, general_ref: XmiId, inheritance_type: str = "public", is_virtual: bool = False, is_final: bool = False) -> None:
         """Write generalization element - XMI 2.1 compliant."""

@@ -1,5 +1,5 @@
-from dataclasses import dataclass
-from typing import List, Optional, Dict, Tuple, Union
+from dataclasses import dataclass, field
+from typing import List, Optional, Dict, Tuple, Union, Any
 from uml_types import (
     XmiId, ElementName, TypeName, Multiplicity, 
     ElementKind, Visibility, AggregationType,
@@ -57,7 +57,11 @@ class UmlElement:
     templates: List[str] = None  # List of template parameter names
     literals: List[str] = None  # List of enum literal names
     namespace: Optional[str] = None  # Namespace for this element
-    original_data: Optional[Dict[str, Union[str, int, bool, List[str]]]] = None  # Store original raw data with specific types
+    original_data: Optional[Dict[str, Any]] = None  # Store original raw data (structure may vary)
+    # Extended fields for stub/template handling
+    is_stub: bool = False
+    instantiation_of: Optional[XmiId] = None
+    instantiation_args: List[XmiId] = field(default_factory=list)
     
     def __post_init__(self):
         if self.operations is None:

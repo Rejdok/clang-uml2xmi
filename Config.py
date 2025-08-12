@@ -4,8 +4,8 @@ Configuration classes for UML2Papyrus project.
 Contains only behavioral configuration, not model structures.
 """
 
-from dataclasses import dataclass
-from typing import Dict, Any, Optional
+from dataclasses import dataclass, field
+from typing import Dict, Any, Optional, List
 from enum import Enum
 
 # Import enums from UmlModel to avoid duplication
@@ -68,6 +68,8 @@ class GeneratorConfig:
     # Behavior flags
     enable_template_binding: bool = True   # If true, materialize instantiations with templateBinding
     strict_validation: bool = False        # If true, fail generation on validation issues
+    
+    # Placeholder for future type system profiles (disabled)
     
     def __post_init__(self):
         """Initialize default configurations if not provided."""

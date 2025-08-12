@@ -4,7 +4,7 @@ Test file for complex template scenarios in CppModelBuilder.
 """
 
 import json
-from CppModelBuilder import CppModelBuilder
+from build.cpp.builder import CppModelBuilder
 from CppParser import CppTypeParser
 
 def test_complex_template_inheritance():
@@ -52,7 +52,7 @@ def test_complex_template_inheritance():
     }
     
     builder = CppModelBuilder(mock_data)
-    builder.prepare()
+    # prepare is implicit in build pipeline wrapper
     result = builder.build()
     
     print(f"Elements created: {len(result['created'])}")
@@ -114,7 +114,6 @@ def test_template_associations():
     }
     
     builder = CppModelBuilder(mock_data)
-    builder.prepare()
     result = builder.build()
     
     print(f"Associations created: {len(result['associations'])}")
@@ -162,7 +161,6 @@ def test_nested_template_resolution():
     }
     
     builder = CppModelBuilder(mock_data)
-    builder.prepare()
     result = builder.build()
     # Ensure no crash and at least one association created to nested std::map or its args
     assert isinstance(result['associations'], list)
@@ -194,7 +192,7 @@ def test_reference_and_variadic_cleaning():
     """Types with references ("&", "&&") and packs ("...") should be normalized in names.
     Ensures builder doesn't produce element names with these suffixes.
     """
-    from CppModelBuilder import CppModelBuilder
+    from build.cpp.builder import CppModelBuilder
 
     mock = {
         "elements": [

@@ -5,13 +5,18 @@ from lxml import etree
 
 from Config import LayoutConfig, DiagramConfig, DEFAULT_CONFIG
 from Model import DiagramModel, UmlModel, DEFAULT_MODEL
+try:
+    from meta import DEFAULT_META as NEW_DEFAULT_META
+    _HAS_META = True
+except Exception:
+    _HAS_META = False
 from Utils import stable_id
 from UmlModel import UmlElement, ElementKind, ElementName
 
 from uml_types import ElementAttributes
 
-# Type aliases for better readability
-ElementDict = Dict[ElementName, UmlElement]
+# Type aliases for better readability (allow any key type: ElementName or XmiId)
+ElementDict = Dict[Any, UmlElement]
 
 class NotationWriter:
     def __init__(self, created: ElementDict, out_notation: str, 
@@ -26,7 +31,7 @@ class NotationWriter:
         
         # Use provided model or default
         if model is None:
-            model = DEFAULT_MODEL
+            model = DEFAULT_MODEL if not _HAS_META else NEW_DEFAULT_META  # type: ignore[assignment]
         self.model: DiagramModel = model
         
         # Extract configurations and models for convenience

@@ -14,11 +14,21 @@ from UmlModel import (
 from XmiWriter import XmiWriter
 from Utils import stable_id, xml_text
 from Model import DEFAULT_MODEL
+try:
+    from meta import DEFAULT_META as NEW_DEFAULT_META
+    _HAS_META = True
+except Exception:
+    _HAS_META = False
 from CppParser import CppTypeParser
 
 from uml_types import TypedDict
 
 logger = logging.getLogger(__name__)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter('%(levelname)s:%(name)s:%(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
 # Type aliases for better readability
 class NamespaceTree(TypedDict):
@@ -60,10 +70,15 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
             extra_attrs = {"isTemplate": "true"}
         
         # Extract short name from qualified name (e.g., "MyNamespace::MyClass" -> "MyClass")
-        short_name = str(name).split('::')[-1] if '::' in str(name) else str(name)
+        short_name_full = str(name).split('::')[-1] if '::' in str(name) else str(name)
+        # For template definitions (not instantiations), drop angle args in printed name to avoid matching 'map<'
+        if hasattr(info, 'templates') and info.templates and not getattr(info, 'instantiation_of', None):
+            short_name = short_name_full.split('<')[0]
+        else:
+            short_name = short_name_full
         
-        # Use UML model for element type
-        uml_model = DEFAULT_MODEL.uml
+        # Use UML model for element type (prefer new meta if present)
+        uml_model = (NEW_DEFAULT_META.uml if _HAS_META else DEFAULT_MODEL.uml)
         self.writer.start_packaged_element(xmi, uml_model.class_type, short_name, is_abstract=is_abstract, extra_attrs=extra_attrs)
         
         # Write template parameters if this is a template class - XMI 2.1 compliant
@@ -75,23 +90,15 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
                 self.writer.write_template_parameter(template_id, template_param)
             self.writer.end_template_signature()
 
-        # Write template binding for instantiation elements (guarded)
+        # Write template binding for instantiation elements
         inst_of = getattr(info, 'instantiation_of', None)
         inst_args = getattr(info, 'instantiation_args', []) or []
         if inst_of and isinstance(inst_args, list) and inst_args and all(arg is not None for arg in inst_args):
-            # Verify base template has a signature (i.e., base element is a template)
-            base_elem = None
+            signature_ref: XmiId = XmiId(stable_id(str(inst_of) + ":templateSignature"))
             try:
-                base_elem = self.model.elements.get(inst_of)  # type: ignore[attr-defined]
-            except Exception:
-                base_elem = None
-            has_signature = bool(base_elem and getattr(base_elem, 'templates', None))
-            if has_signature:
-                signature_ref: XmiId = XmiId(stable_id(str(inst_of) + ":templateSignature"))
-                try:
-                    self.writer.write_template_binding(stable_id(xmi + ":binding"), signature_ref, inst_args)  # type: ignore[arg-type]
-                except Exception as e:
-                    logger.warning(f"Skip templateBinding for '{name}': {e}")
+                self.writer.write_template_binding(stable_id(xmi + ":binding"), signature_ref, inst_args)  # type: ignore[arg-type]
+            except Exception as e:
+                logger.warning(f"Skip templateBinding for '{name}': {e}")
         
         # Write generalizations as owned elements - XMI 2.1 compliant
         generalizations = getattr(self.model, "generalizations", []) or []
@@ -158,8 +165,8 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
         # Extract short name from qualified name (e.g., "MyNamespace::MyEnum" -> "MyEnum")
         short_name = str(name).split('::')[-1] if '::' in str(name) else str(name)
         
-        # Use UML model for element type
-        uml_model = DEFAULT_MODEL.uml
+        # Use UML model for element type (prefer new meta if present)
+        uml_model = (NEW_DEFAULT_META.uml if _HAS_META else DEFAULT_MODEL.uml)
         self.writer.start_packaged_element(xmi, uml_model.enum_type, short_name, is_abstract=is_abstract)
         
         # Handle literals if they exist - XMI 2.1 compliant
@@ -179,8 +186,8 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
         # Extract short name from qualified name (e.g., "MyNamespace::MyType" -> "MyType")
         short_name = str(name).split('::')[-1] if '::' in str(name) else str(name)
         
-        # Use UML model for element type
-        uml_model = DEFAULT_MODEL.uml
+        # Use UML model for element type (prefer new meta if present)
+        uml_model = (NEW_DEFAULT_META.uml if _HAS_META else DEFAULT_MODEL.uml)
         self.writer.start_packaged_element(xmi, uml_model.datatype_type, short_name, is_abstract=is_abstract)
         
         # Add generalization if underlying type exists - XMI 2.1 compliant
@@ -195,36 +202,75 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
 class XmiGenerator:
     """Generates XMI files from UML model data."""
     
-    def __init__(self, model: UmlModel) -> None:
+    def __init__(self, model: UmlModel, graph: Optional[Any] = None) -> None:
         self.model: UmlModel = model
         self.name_to_xmi: Dict[ElementName, XmiId] = model.name_to_xmi
-        
-        # Create a mapping from ElementName to UmlElement for namespace tree building
-        self.created: Dict[ElementName, UmlElement] = {}
-        for name, xmi_id in self.name_to_xmi.items():
-            if xmi_id in model.elements:
-                self.created[name] = model.elements[xmi_id]
-        
-        # Build namespace tree for real elements only
-        self.namespace_tree: NamespaceTree = self._build_namespace_tree(self.created)
-        
-        # Collect all referenced type names
+        self.graph = graph
+
+        # Base mapping of created elements
+        self.created: Dict[ElementName, UmlElement] = {
+            name: model.elements[xmi]
+            for name, xmi in self.name_to_xmi.items()
+            if xmi in model.elements
+        }
+
+        # Prefer graph namespaces if provided; otherwise build from names
+        if self.graph and hasattr(self.graph, "namespaces") and hasattr(self.graph, "elements_by_id"):
+            try:
+                self.namespace_tree = self._build_tree_from_namespace_node(self.graph.namespaces, self.graph.elements_by_id)
+            except Exception:
+                self.namespace_tree = self._build_namespace_tree(self.created)
+        else:
+            self.namespace_tree: NamespaceTree = self._build_namespace_tree(self.created)
+
+        # Preserve legacy behavior: collect references, create stubs, cleanup associations,
+        # then refresh namespace tree and validate
         self.all_referenced_type_names: Set[str] = self._collect_referenced_types()
-        
-        # Create stub elements for referenced but undefined types
         self._create_stub_elements()
-        
-        # Resolve association targets to use the correct stub element IDs
         self._resolve_association_targets()
-        
-        # Clean up invalid associations
         self._cleanup_invalid_associations()
-        
-        # Update namespace tree with stubs
-        self.namespace_tree = self._build_namespace_tree(self.created)
-        
-        # Validate the model before generation
+        # Rebuild namespace tree to include any newly created stubs
+        if self.graph and hasattr(self.graph, "namespaces") and hasattr(self.graph, "elements_by_id"):
+            try:
+                # Update elements_by_id with any new stubs
+                for name, elem in self.created.items():
+                    # ensure graph elements_by_id includes them if missing
+                    if elem.xmi not in self.graph.elements_by_id:
+                        self.graph.elements_by_id[elem.xmi] = elem
+                self.namespace_tree = self._build_tree_from_namespace_node(self.graph.namespaces, self.graph.elements_by_id)
+            except Exception:
+                self.namespace_tree = self._build_namespace_tree(self.created)
+        else:
+            self.namespace_tree = self._build_namespace_tree(self.created)
         self._validate_model()
+
+    def _build_tree_from_namespace_node(self, node: Any, elements_by_id: Dict[XmiId, UmlElement]) -> NamespaceTree:
+        """Convert NamespaceNode-based tree to internal dict structure used by writer.
+
+        The internal structure uses dicts with markers: {'__namespace__': True, '__children__': {...}, '__xmi_id__': id}
+        and UmlElement values for elements.
+        """
+        def rec(ns_node: Any) -> Dict[str, Any]:
+            out: Dict[str, Any] = {}
+            # construct this level namespace wrapper if not root
+            # children namespaces
+            children = getattr(ns_node, 'children', {}) or {}
+            for name, child in children.items():
+                out[name] = {'__namespace__': True, '__children__': rec(child)}
+                xmi_id = getattr(child, 'xmi_id', None)
+                if xmi_id:
+                    out[name]['__xmi_id__'] = xmi_id
+            # elements at this level
+            elem_ids = getattr(ns_node, 'elements', []) or []
+            for eid in elem_ids:
+                elem = elements_by_id.get(eid)
+                if elem is not None:
+                    # use simple name as key if possible
+                    key = str(getattr(elem, 'name', eid))
+                    out[key] = elem
+            return out
+
+        return rec(node)
 
     def _build_namespace_tree(self, elements: Dict[ElementName, UmlElement]) -> NamespaceTree:
         """Build namespace hierarchy tree from elements."""
@@ -473,7 +519,7 @@ class XmiGenerator:
             'associations': len(self.model.associations),
             'dependencies': len(self.model.dependencies),
             'generalizations': len(getattr(self.model, 'generalizations', []) or []),
-            'stub_elements': len([e for e in self.created.values() if str(e.xmi).startswith('stub:')])
+            'stub_elements': sum(1 for e in self.created.values() if getattr(e, 'is_stub', False))
         }
         
         logger.info("Model statistics:")
@@ -534,7 +580,6 @@ class XmiGenerator:
 
     def write(self, out_path: str, project_name: str) -> None:
         """Write the complete XMI file."""
-        from Model import DEFAULT_MODEL
         
         logger.info(f"Starting XMI generation for project: {project_name}")
         logger.info(f"Output file: {out_path}")
@@ -548,7 +593,7 @@ class XmiGenerator:
         # Step 4: Write the document
         try:
             with etree.xmlfile(out_path, encoding="utf-8") as xf:
-                writer: XmiWriter = XmiWriter(xf, xml_model=DEFAULT_MODEL.xml)
+                writer: XmiWriter = XmiWriter(xf, xml_model=(NEW_DEFAULT_META.xml if _HAS_META else DEFAULT_MODEL.xml))
                 writer.start_doc(project_name, model_id="model_1")
                 
                 visitor: UmlXmiWritingVisitor = UmlXmiWritingVisitor(writer, self.name_to_xmi, self.model)
@@ -559,7 +604,7 @@ class XmiGenerator:
                 # Associations, Dependencies, and Generalizations are written at the root level
                 logger.info(f"Writing {len(self.model.associations)} associations")
                 for assoc in self.model.associations:
-                    writer.write_association(assoc, uml_model=DEFAULT_MODEL.uml)
+                    writer.write_association(assoc, uml_model=(NEW_DEFAULT_META.uml if _HAS_META else DEFAULT_MODEL.uml))
 
                 logger.info(f"Writing {len(self.model.dependencies)} dependencies")
                 for owner_q_name, typ in self.model.dependencies:
@@ -577,7 +622,7 @@ class XmiGenerator:
                         dep_id: str = stable_id(f"dep:{owner_q_name}:{typ}")
                         
                         # Use model for dependency attributes
-                        xml_model = DEFAULT_MODEL.xml
+                        xml_model = (NEW_DEFAULT_META.xml if _HAS_META else DEFAULT_MODEL.xml)
                         
                         attribs: Dict[str, str] = {
                             xml_model.xmi_type: "uml:Dependency", 

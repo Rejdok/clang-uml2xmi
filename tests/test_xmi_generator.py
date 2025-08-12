@@ -187,7 +187,7 @@ def test_xmi_generator():
 def test_template_binding_generation():
     """Ensure template instantiation element is generated (with default binding disabled in writer)."""
     import tempfile, os
-    from CppModelBuilder import CppModelBuilder
+    from build.cpp.builder import CppModelBuilder
     from UmlModel import UmlModel as UmlCoreModel
 
     data = {
@@ -233,7 +233,7 @@ def test_template_binding_generation():
 def test_instantiation_namespace_structure():
     """Instantiation packaged element should be placed under its namespace packages in XMI."""
     import tempfile, os
-    from CppModelBuilder import CppModelBuilder
+    from build.cpp.builder import CppModelBuilder
     from UmlModel import UmlModel as UmlCoreModel
 
     data = {
@@ -290,7 +290,7 @@ def test_instantiation_namespace_structure():
 def test_template_binding_nested_and_multiargs():
     """TemplateBinding should exist for multi-arg and nested templates (map<string, vector<int>>)."""
     import tempfile, os
-    from CppModelBuilder import CppModelBuilder
+    from build.cpp.builder import CppModelBuilder
     from UmlModel import UmlModel as UmlCoreModel
 
     data = {

@@ -4,7 +4,7 @@
 """
 
 import json
-from CppModelBuilder import CppModelBuilder
+from build.cpp.builder import CppModelBuilder
 from XmiGenerator import XmiGenerator
 import tempfile
 import os
@@ -94,7 +94,7 @@ def test_stubs_in_namespaces():
         print("🔍 Проверяем name_to_xmi:")
         for name, xmi_id in build_result["name_to_xmi"].items():
             print(f"   - {name} -> {xmi_id}")
-        return False
+        assert False, "Класс MyClass не найден в созданной модели"
     
     print("\n🔍 Тестирование генерации XMI...")
     
@@ -123,21 +123,21 @@ def test_stubs_in_namespaces():
             print("✅ Пакеты (неймспейсы) найдены в XMI")
         else:
             print("❌ Пакеты (неймспейсы) НЕ найдены в XMI")
-            return False
+            assert False, "Пакеты (неймспейсы) не найдены в XMI"
         
         # Проверяем наличие неймспейса std
         if 'name="std"' in xmi_content:
             print("✅ Неймспейс 'std' найден")
         else:
             print("❌ Неймспейс 'std' НЕ найден")
-            return False
+            assert False, "Неймспейс 'std' не найден"
         
         # Проверяем наличие неймспейса mynamespace
         if 'name="mynamespace"' in xmi_content:
             print("✅ Неймспейс 'mynamespace' найден")
         else:
             print("❌ Неймспейс 'mynamespace' НЕ найден")
-            return False
+            assert False, "Неймспейс 'mynamespace' не найден"
         
         # Проверяем, что заглушка std::vector находится в пакете std
         # Ищем структуру: <packagedElement xmi:type="uml:Package" name="std">...<packagedElement xmi:type="uml:DataType" name="vector<int>">
@@ -145,10 +145,10 @@ def test_stubs_in_namespaces():
             print("✅ Заглушка std::vector<int> найдена в неймспейсе std")
         else:
             print("❌ Заглушка std::vector<int> НЕ найдена в неймспейсе std")
-            return False
+            assert False, "Заглушка std::vector<int> не найдена в неймспейсе std"
         
         print("\n🎉 Все тесты пройдены! Заглушки теперь попадают в неймспейсы.")
-        return True
+        assert True
         
     finally:
         # Удаляем временный файл
