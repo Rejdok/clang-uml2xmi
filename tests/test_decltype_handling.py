@@ -3,7 +3,7 @@
 Test file for decltype handling in CppParser.
 """
 
-from CppParser import CppTypeParser
+from adapters.clang_uml import CppTypeParser
 
 def test_decltype_parsing():
     """Test how decltype expressions are parsed."""

@@ -1,4 +1,4 @@
-# Architecture Overview
+## Architecture Overview
 
 This document summarizes the refactored architecture of the uml2papyrus project.
 
@@ -19,12 +19,12 @@ This document summarizes the refactored architecture of the uml2papyrus project.
     - associations.py, dependencies.py, inheritance.py: relations
     - template_utils.py: helpers (names, templates)
 - gen/: XMI/notation generation
-  - XmiGenerator.py: pure serialization from UmlModel (+optional UmlGraph)
-  - XmiWriter.py: low-level XML writing helpers
-  - NotationWriter.py: Papyrus notation (layout)
+  - xmi/generator.py: pure serialization from `core.UmlModel` (+optional `core.UmlGraph`)
+  - xmi/writer.py: low-level XML writing helpers
+  - notation/writer.py: Papyrus notation (layout)
 - app/: CLI and config
-  - cpp2uml.py: main entrypoint
-  - Config.py: generator and diagram config
+  - cli.py: argument parsing and entrypoint helpers
+  - config.py: generator and diagram config
 - tests/: pytest test suite (moved from root)
 
 ## Data Flow
@@ -39,9 +39,10 @@ This document summarizes the refactored architecture of the uml2papyrus project.
 - Meta-models isolated in meta/
 - Types profiles (types_profiles/) prepared for declarative rules (currently disabled)
 
-## Backward Compatibility
-- Legacy CppModelBuilder.py removed; public API is build.cpp.builder.CppModelBuilder
-- Model.DEFAULT_MODEL remains as a fallback when meta/ is not used
+## Public API
+- `build.cpp.builder.CppModelBuilder` — phased builder for C++
+- `gen.xmi.generator.XmiGenerator` — XMI generator
+- `gen.notation.writer.NotationWriter` — notation writer
 
 ## Testing
 - All tests under tests/ executed with pytest

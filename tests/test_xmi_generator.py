@@ -6,9 +6,10 @@ Test script for the improved XmiGenerator.
 import logging
 import tempfile
 import os
-from UmlModel import UmlModel, UmlElement, ElementKind, ClangMetadata, XmiId, ElementName
-from XmiGenerator import XmiGenerator
-from XmiWriter import XmiWriter
+from core.uml_model import UmlModel, UmlElement, ClangMetadata, XmiId, ElementName
+from uml_types import ElementKind
+from gen.xmi.generator import XmiGenerator
+from gen.xmi.writer import XmiWriter
 from lxml import etree
 
 # Configure logging for testing
@@ -32,7 +33,8 @@ def create_test_model():
     class1.templates = ["T", "U"]
     
     # Add some members
-    from UmlModel import UmlMember, Visibility
+    from core.uml_model import UmlMember
+    from uml_types import Visibility
     member1 = UmlMember(
         name="value",
         type_repr="T",
@@ -76,7 +78,7 @@ def create_test_model():
     name_to_xmi[enum1.name] = enum1.xmi
     
     # Create the model with proper constructor arguments
-    from UmlModel import UmlModel
+    from core.uml_model import UmlModel
     model = UmlModel(
         elements=elements,
         associations=[],
@@ -145,7 +147,8 @@ def test_xmi_generator():
             used_types=frozenset(),
             underlying=None
         )
-        from UmlModel import UmlAssociation, AggregationType, UmlOperation
+        from core.uml_model import UmlAssociation, UmlOperation
+        from uml_types import AggregationType
         assoc = UmlAssociation(src=class2.xmi, tgt=class3.xmi, aggregation=AggregationType.NONE, multiplicity="1", name="uses")
         op = UmlOperation(name="foo", return_type="int", parameters=[], visibility=ElementKind.CLASS.value)
 
@@ -188,7 +191,7 @@ def test_template_binding_generation():
     """Ensure template instantiation element is generated (with default binding disabled in writer)."""
     import tempfile, os
     from build.cpp.builder import CppModelBuilder
-    from UmlModel import UmlModel as UmlCoreModel
+    from core.uml_model import UmlModel as UmlCoreModel
 
     data = {
         "elements": [
@@ -234,7 +237,7 @@ def test_instantiation_namespace_structure():
     """Instantiation packaged element should be placed under its namespace packages in XMI."""
     import tempfile, os
     from build.cpp.builder import CppModelBuilder
-    from UmlModel import UmlModel as UmlCoreModel
+    from core.uml_model import UmlModel as UmlCoreModel
 
     data = {
         "elements": [
@@ -291,7 +294,7 @@ def test_template_binding_nested_and_multiargs():
     """TemplateBinding should exist for multi-arg and nested templates (map<string, vector<int>>)."""
     import tempfile, os
     from build.cpp.builder import CppModelBuilder
-    from UmlModel import UmlModel as UmlCoreModel
+    from core.uml_model import UmlModel as UmlCoreModel
 
     data = {
         "elements": [

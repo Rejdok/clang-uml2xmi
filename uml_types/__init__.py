@@ -4,7 +4,7 @@ Types module for UML2Papyrus project.
 Centralized type definitions organized by domain.
 """
 
-# Re-export all types for backward compatibility
+# Public types export
 from .base import (
     T, K, V,
     TypedList, TypedDict,
@@ -34,7 +34,6 @@ from .protocols import (
     XmlElement, BuildResult, TypeAnalysisResult
 )
 
-# Legacy imports for backward compatibility
 __all__ = [
     # Base types
     'T', 'K', 'V', 'TypedList', 'TypedDict', 'XmlValue',

@@ -5,7 +5,7 @@ Test file for improved template handling in CppModelBuilder.
 
 import json
 from build.cpp.builder import CppModelBuilder
-from CppParser import CppTypeParser
+from adapters.clang_uml import CppTypeParser
 
 def test_template_parsing():
     """Test enhanced template parsing functionality."""

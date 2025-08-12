@@ -18,13 +18,13 @@ import sys, re, uuid, hashlib, json
 
 from build.cpp.builder import CppModelBuilder
 from utils.logging_config import configure_logging
-from UmlModel import UmlModel, ElementName, XmiId
-from XmiGenerator import XmiGenerator
-from NotationWriter import NotationWriter
-from Config import GeneratorConfig, DEFAULT_CONFIG
+from core.uml_model import UmlModel, ElementName, XmiId
+from gen.xmi.generator import XmiGenerator
+from gen.notation.writer import NotationWriter
+from app.config import GeneratorConfig, DEFAULT_CONFIG
 import json as _json
 
-# Try orjson if available (faster), otherwise fallback
+# Try orjson if available (faster), otherwise use json
 try:
     import orjson as _orjson  # type: ignore
     def load_json(path: str) -> Any:
@@ -58,7 +58,7 @@ class Cpp2UmlApp:
         builder = CppModelBuilder(j, enable_template_binding=self.config.__dict__.get('enable_template_binding', True))
         prep = builder.build()
 
-        # Prefer UmlGraph if available (non-breaking: falls back to legacy)
+        # Prefer UmlGraph if available
         graph = prep.get("graph") if isinstance(prep, dict) else None
 
         # Build UmlModel structure
@@ -80,7 +80,7 @@ class Cpp2UmlApp:
 
         # XMI generation (pass graph when available)
         xmi_gen = XmiGenerator(model, graph=graph)
-        xmi_gen.write(self.out_uml, project_name)
+        xmi_gen.write(self.out_uml, project_name, pretty=self.config.__dict__.get('pretty_print', False))
 
         # Notation generation (Papyrus minimal) using configuration and model
         notation_writer = NotationWriter(
@@ -113,6 +113,11 @@ def _parse_cli(argv: list[str], config: GeneratorConfig) -> tuple[str, str, str,
             config.types_profiles = (config.types_profiles or []) + [argv[i + 1]]
             i += 2
             continue
+        # pretty-print
+        if arg == "--pretty":
+            config.pretty_print = True
+            i += 1
+            continue
         # skip unknown
         i += 1
     return inp, out_uml, out_notation, config
@@ -126,7 +131,7 @@ def main():
     except Exception:
         pass
 
-    # Parse CLI with optional flags, keeping backward compatibility
+    # Parse CLI with optional flags
     try:
         inp, out_uml, out_notation, cfg = _parse_cli(sys.argv, DEFAULT_CONFIG)
     except SystemExit as e:
@@ -170,7 +175,7 @@ def main():
         pipe.generate(artifacts, out_uml, out_notation)
         print("Written", out_uml, "and", out_notation)
     except Exception:
-        # Fallback to legacy app
+        # Execute CLI app
         app = Cpp2UmlApp(inp, out_uml, out_notation, config=cfg)
         app.run()
     return 0

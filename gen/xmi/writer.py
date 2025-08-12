@@ -2,37 +2,25 @@ from typing import Any, Dict, Optional, List, Union, Protocol
 import logging
 from lxml import etree
 
-from Utils import stable_id, xml_text
-from Model import XmlModel, UmlModel, DEFAULT_MODEL
-try:
-    # Prefer new meta bundle if available
-    from meta import XmlMetaModel as NewXmlModel, UmlMetaModel as NewUmlModel, DEFAULT_META
-    _HAS_META = True
-except Exception:
-    _HAS_META = False
-from UmlModel import UmlAssociation, XmiId
+from utils.ids import stable_id
+from utils.xml import xml_text
+from meta import XmlMetaModel as NewXmlModel, UmlMetaModel as NewUmlModel, DEFAULT_META
+from core.uml_model import UmlAssociation, XmiId
 
-from uml_types import (
-    ContextStack, ElementAttributes, XmlElement,
-    ModelName, ModelId
-)
+from uml_types import ContextStack, ElementAttributes
 
 # Setup logger
 logger = logging.getLogger(__name__)
 
 class XmiWriter:
-    def __init__(self, xf: etree.xmlfile, xml_model: Optional[XmlModel] = None) -> None:
+    def __init__(self, xf: etree.xmlfile, xml_model: Optional[NewXmlModel] = None) -> None:
         self.xf: etree.xmlfile = xf
         self._ctx_stack: ContextStack = []
         
         # Use provided model or default
         if xml_model is None:
-            # If new meta exists, use it; otherwise fallback to legacy Model.DEFAULT_MODEL
-            if _HAS_META:
-                xml_model = DEFAULT_META.xml  # type: ignore[assignment]
-            else:
-                xml_model = DEFAULT_MODEL.xml
-        self.config: XmlModel = xml_model
+            xml_model = DEFAULT_META.xml  # type: ignore[assignment]
+        self.config: NewXmlModel = xml_model  # type: ignore[assignment]
 
     def start_doc(self, model_name: str, model_id: str = "model_1") -> None:
         """Start XMI 2.1 document with proper namespaces."""
@@ -222,9 +210,14 @@ class XmiWriter:
 
     def start_template_signature(self, signature_id: str) -> None:
         """Start template signature - XMI 2.1 compliant."""
-        ctx: etree._Element = self.xf.element("ownedTemplateSignature", nsmap=self.config.uml_nsmap, **{
-            self.config.xmi_id: signature_id
-        })
+        ctx: etree._Element = self.xf.element(
+            "ownedTemplateSignature",
+            nsmap=self.config.uml_nsmap,
+            **{
+                self.config.xmi_id: signature_id,
+                self.config.xmi_type: "uml:RedefinableTemplateSignature",
+            },
+        )
         ctx.__enter__()
         self._ctx_stack.append(ctx)
 
@@ -235,10 +228,15 @@ class XmiWriter:
 
     def write_template_parameter(self, template_id: str, parameter_name: str) -> None:
         """Write template parameter - XMI 2.1 compliant."""
-        el: etree._Element = etree.Element("ownedTemplateParameter", nsmap=self.config.uml_nsmap, **{
-            self.config.xmi_id: template_id,
-            "name": xml_text(parameter_name)
-        })
+        el: etree._Element = etree.Element(
+            "ownedTemplateParameter",
+            nsmap=self.config.uml_nsmap,
+            **{
+                self.config.xmi_id: template_id,
+                self.config.xmi_type: "uml:TemplateParameter",
+                "name": xml_text(parameter_name),
+            },
+        )
         self.xf.write(el)
 
     def write_template_binding(self, binding_id: str, signature_ref: XmiId, arg_ids: List[XmiId]) -> None:
@@ -304,11 +302,11 @@ class XmiWriter:
         el: etree._Element = etree.Element("generalization", attrib=attrs, nsmap=self.config.uml_nsmap)
         self.xf.write(el)
 
-    def write_association(self, assoc: UmlAssociation, uml_model: Optional[UmlModel] = None) -> None:
+    def write_association(self, assoc: UmlAssociation, uml_model: Optional[NewUmlModel] = None) -> None:
         """Write association - XMI 2.1 compliant."""
         # Get UML model for type information
         if uml_model is None:
-            uml_model = DEFAULT_MODEL.uml
+            uml_model = DEFAULT_META.uml  # type: ignore[assignment]
         
         # Prefer precomputed stable ids (set earlier in XmiGenerator.write)
         aid: str = assoc._assoc_id or stable_id(f"assoc:{assoc.src}:{assoc.tgt}:{assoc.name}")
@@ -371,12 +369,12 @@ class XmiWriter:
         # Use target element ID as name for end2
         end2_el = etree.SubElement(assoc_el, "ownedEnd", attrib={
             self.config.xmi_id: end2_id,
-            "name": f"end2_{assoc.tgt}",  # Use target ID as name
+            "name": xml_text(assoc.name or f"end2_{assoc.tgt}"),
             "visibility": "public",
             "isOrdered": "false",
             "isUnique": "true",
             "isReadOnly": "false",
-            "aggregation": "none",
+            "aggregation": (assoc.aggregation.value if hasattr(assoc.aggregation, 'value') else str(assoc.aggregation) if assoc.aggregation else "none"),
             "type": str(assoc.tgt),
             "association": aid
         }, nsmap=self.config.uml_nsmap)
@@ -408,3 +406,7 @@ class XmiWriter:
     def write_packaged_element_raw(self, element: etree._Element) -> None:
         """Write raw packaged element - XMI 2.1 compliant."""
         self.xf.write(element)
+
+__all__ = ["XmiWriter"]
+
+

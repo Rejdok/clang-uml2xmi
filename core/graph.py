@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
 from uml_types import XmiId, ElementName, TypeName
-from UmlModel import UmlElement, UmlAssociation, UmlGeneralization
+from core.uml_model import UmlElement, UmlAssociation, UmlGeneralization
 from .namespace import NamespaceNode, build_namespace_tree
 
 

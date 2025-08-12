@@ -7,8 +7,9 @@ import logging
 import tempfile
 import os
 import xml.etree.ElementTree as ET
-from UmlModel import UmlModel, UmlElement, ElementKind, ClangMetadata, XmiId, ElementName
-from XmiGenerator import XmiGenerator
+from core.uml_model import UmlModel, UmlElement, ClangMetadata, XmiId, ElementName
+from uml_types import ElementKind
+from gen.xmi.generator import XmiGenerator
 
 # Configure logging for testing
 logging.basicConfig(level=logging.INFO)

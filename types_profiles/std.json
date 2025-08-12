@@ -49,7 +49,18 @@
     "std::pmr::multiset": "std::multiset",
     "std::pmr::unordered_set": "std::unordered_set",
     "std::pmr::unordered_multiset": "std::unordered_multiset",
-    "std::pmr::string": "std::string"
+    "std::pmr::string": "std::string",
+    "pair": "std::pair",
+    "tuple": "std::tuple",
+    "variant": "std::variant",
+    "optional": "std::optional",
+    "expected": "std::expected",
+    "reference_wrapper": "std::reference_wrapper",
+    "function": "std::function",
+    "any": "std::any",
+    "duration": "std::chrono::duration",
+    "time_point": "std::chrono::time_point",
+    "path": "std::filesystem::path"
   },
   "rules": [
     {

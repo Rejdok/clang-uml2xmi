@@ -5,7 +5,7 @@
 
 import json
 from build.cpp.builder import CppModelBuilder
-from XmiGenerator import XmiGenerator
+from gen.xmi.generator import XmiGenerator
 import tempfile
 import os
 
@@ -42,7 +42,7 @@ def test_stubs_in_namespaces():
     build_result = builder.build()
     
     # Создаем UmlModel из результата
-    from UmlModel import UmlModel
+    from core.uml_model import UmlModel
     
     # CppModelBuilder возвращает created как ElementName -> UmlElement
     # Но UmlModel ожидает elements как XmiId -> UmlElement

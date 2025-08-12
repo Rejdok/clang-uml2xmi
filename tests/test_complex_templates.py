@@ -5,7 +5,7 @@ Test file for complex template scenarios in CppModelBuilder.
 
 import json
 from build.cpp.builder import CppModelBuilder
-from CppParser import CppTypeParser
+from adapters.clang_uml import CppTypeParser
 
 def test_complex_template_inheritance():
     """Test complex template inheritance scenarios."""

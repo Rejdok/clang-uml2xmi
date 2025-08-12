@@ -228,3 +228,14 @@ class UmlModel:
         """Validate the entire model and raise ValueError if invalid."""
         self._validate_model_consistency()
 
+__all__ = [
+    "UmlMember",
+    "UmlOperation",
+    "ClangMetadata",
+    "UmlElement",
+    "UmlAssociation",
+    "UmlGeneralization",
+    "UmlModel",
+]
+
+
