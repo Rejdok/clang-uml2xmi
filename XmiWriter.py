@@ -19,11 +19,6 @@ from uml_types import (
 
 # Setup logger
 logger = logging.getLogger(__name__)
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter('%(levelname)s:%(name)s:%(message)s')
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
 
 class XmiWriter:
     def __init__(self, xf: etree.xmlfile, xml_model: Optional[XmlModel] = None) -> None:

@@ -1,0 +1,205 @@
+{
+  "aliases": {
+    "vector": "std::vector",
+    "list": "std::list",
+    "deque": "std::deque",
+    "forward_list": "std::forward_list",
+    "array": "std::array",
+    "map": "std::map",
+    "multimap": "std::multimap",
+    "unordered_map": "std::unordered_map",
+    "unordered_multimap": "std::unordered_multimap",
+    "set": "std::set",
+    "multiset": "std::multiset",
+    "unordered_set": "std::unordered_set",
+    "unordered_multiset": "std::unordered_multiset",
+    "stack": "std::stack",
+    "queue": "std::queue",
+    "priority_queue": "std::priority_queue",
+    "span": "std::span",
+    "valarray": "std::valarray",
+    "bitset": "std::bitset",
+    "function": "std::function",
+    "any": "std::any",
+    "error_code": "std::error_code",
+    "error_condition": "std::error_condition",
+    "system_error": "std::system_error",
+    "unique_ptr": "std::unique_ptr",
+    "shared_ptr": "std::shared_ptr",
+    "weak_ptr": "std::weak_ptr",
+    "string": "std::string",
+    "string_view": "std::string_view",
+    "basic_string_view": "std::string_view",
+    "basic_string": "std::string",
+    "u8string": "std::string",
+    "u16string": "std::string",
+    "u32string": "std::string",
+    "wstring": "std::string",
+    "filesystem::path": "std::string",
+    "std::filesystem::path": "std::string",
+    "std::pmr::vector": "std::vector",
+    "std::pmr::list": "std::list",
+    "std::pmr::deque": "std::deque",
+    "std::pmr::forward_list": "std::forward_list",
+    "std::pmr::map": "std::map",
+    "std::pmr::multimap": "std::multimap",
+    "std::pmr::unordered_map": "std::unordered_map",
+    "std::pmr::unordered_multimap": "std::unordered_multimap",
+    "std::pmr::set": "std::set",
+    "std::pmr::multiset": "std::multiset",
+    "std::pmr::unordered_set": "std::unordered_set",
+    "std::pmr::unordered_multiset": "std::unordered_multiset",
+    "std::pmr::string": "std::string"
+  },
+  "rules": [
+    {
+      "match": { "base": ["std::vector", "std::list", "std::deque", "std::forward_list", "std::set", "std::multiset", "std::unordered_set", "std::unordered_multiset", "std::span", "std::valarray", "std::bitset", "std::array"] },
+      "classify": "container",
+      "container": {
+        "kind": "sequential",
+        "element_args": [0],
+        "multiplicity": "*",
+        "aggregation": "none",
+        "end_name": "items"
+      }
+    },
+    {
+      "match": { "base": ["std::map", "std::unordered_map"] },
+      "classify": "container",
+      "container": {
+        "kind": "associative",
+        "element_args": [1],
+        "multiplicity": "*",
+        "aggregation": "none",
+        "end_name": "values"
+      }
+    },
+    {
+      "match": { "base": ["std::multimap", "std::unordered_multimap"] },
+      "classify": "container",
+      "container": {
+        "kind": "associative",
+        "element_args": [1],
+        "multiplicity": "*",
+        "aggregation": "none",
+        "end_name": "values"
+      }
+    },
+    {
+      "match": { "base": ["std::stack", "std::queue", "std::priority_queue"] },
+      "classify": "container",
+      "container": {
+        "kind": "adapter",
+        "element_args": [0],
+        "multiplicity": "*",
+        "aggregation": "none",
+        "end_name": "items"
+      }
+    },
+    {
+      "match": { "base": ["std::function"] },
+      "classify": "container",
+      "container": {
+        "kind": "callable",
+        "element_args": [0],
+        "multiplicity": "1",
+        "aggregation": "none",
+        "end_name": "call"
+      }
+    },
+    {
+      "match": { "base": ["std::any"] },
+      "classify": "container",
+      "container": {
+        "kind": "opaque",
+        "element_args": [],
+        "multiplicity": "0..1",
+        "aggregation": "none",
+        "end_name": "value"
+      }
+    },
+    {
+      "match": { "base": ["std::error_code", "std::error_condition", "std::system_error"] },
+      "classify": "container",
+      "container": {
+        "kind": "value",
+        "element_args": [],
+        "multiplicity": "1",
+        "aggregation": "none",
+        "end_name": "code"
+      }
+    },
+    {
+      "match": { "base": ["std::chrono::duration"] },
+      "classify": "container",
+      "container": {
+        "kind": "duration",
+        "element_args": [0],
+        "multiplicity": "1",
+        "aggregation": "none",
+        "end_name": "rep"
+      }
+    },
+    {
+      "match": { "base": ["std::chrono::time_point"] },
+      "classify": "container",
+      "container": {
+        "kind": "time",
+        "element_args": [1],
+        "multiplicity": "1",
+        "aggregation": "none",
+        "end_name": "duration"
+      }
+    },
+    {
+      "match": { "base": ["std::optional", "std::expected"] },
+      "classify": "container",
+      "container": {
+        "kind": "optional",
+        "element_args": [0],
+        "multiplicity": "0..1",
+        "aggregation": "none",
+        "end_name": "value"
+      }
+    },
+    {
+      "match": { "base": ["std::tuple", "std::variant"] },
+      "classify": "container",
+      "container": {
+        "kind": "heterogeneous",
+        "element_args": [0,1,2,3,4,5,6,7,8,9],
+        "multiplicity": "1",
+        "aggregation": "none",
+        "end_names": ["e0","e1","e2","e3","e4","e5","e6","e7","e8","e9"]
+      }
+    },
+    {
+      "match": { "base": ["std::pair"] },
+      "classify": "container",
+      "container": {
+        "kind": "heterogeneous",
+        "element_args": [0,1],
+        "multiplicity": "1",
+        "aggregation": "none",
+        "end_names": ["first","second"]
+      }
+    },
+    {
+      "match": { "base": ["std::reference_wrapper"] },
+      "classify": "pointer",
+      "pointer": { "ownership": "shared", "aggregation": "shared" }
+    },
+    {
+      "match": { "base": ["std::unique_ptr"] },
+      "classify": "pointer",
+      "pointer": { "ownership": "exclusive", "aggregation": "composite" }
+    },
+    {
+      "match": { "base": ["std::shared_ptr", "std::weak_ptr"] },
+      "classify": "pointer",
+      "pointer": { "ownership": "shared", "aggregation": "shared" }
+    }
+  ]
+}
+
+

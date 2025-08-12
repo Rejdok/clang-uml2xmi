@@ -24,11 +24,6 @@ from CppParser import CppTypeParser
 from uml_types import TypedDict
 
 logger = logging.getLogger(__name__)
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter('%(levelname)s:%(name)s:%(message)s')
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
 
 # Type aliases for better readability
 class NamespaceTree(TypedDict):

@@ -17,6 +17,7 @@ from typing import Optional, List, Dict, Any
 import sys, re, uuid, hashlib, json
 
 from build.cpp.builder import CppModelBuilder
+from utils.logging_config import configure_logging
 from UmlModel import UmlModel, ElementName, XmiId
 from XmiGenerator import XmiGenerator
 from NotationWriter import NotationWriter
@@ -53,7 +54,7 @@ class Cpp2UmlApp:
 
     def run(self):
         j = load_json(self.in_json)
-        # Build using current configuration (profiles disabled for now)
+        # Build using current configuration
         builder = CppModelBuilder(j, enable_template_binding=self.config.__dict__.get('enable_template_binding', True))
         prep = builder.build()
 
@@ -108,6 +109,10 @@ def _parse_cli(argv: list[str], config: GeneratorConfig) -> tuple[str, str, str,
             config.enable_template_binding = False
             i += 1
             continue
+        if arg == "--types-profile" and i + 1 < len(argv):
+            config.types_profiles = (config.types_profiles or []) + [argv[i + 1]]
+            i += 2
+            continue
         # skip unknown
         i += 1
     return inp, out_uml, out_notation, config
@@ -115,6 +120,12 @@ def _parse_cli(argv: list[str], config: GeneratorConfig) -> tuple[str, str, str,
 
 # ---------- main ----------
 def main():
+    # Configure logging once
+    try:
+        configure_logging()
+    except Exception:
+        pass
+
     # Parse CLI with optional flags, keeping backward compatibility
     try:
         inp, out_uml, out_notation, cfg = _parse_cli(sys.argv, DEFAULT_CONFIG)
@@ -142,6 +153,17 @@ def main():
     # Use the new pipeline to orchestrate build and generation
     try:
         from build.pipeline import BuildPipeline
+        # Inject default std profile unless explicitly disabled
+        if cfg.types_profiles is None:
+            cfg.types_profiles = []
+        if "--no-std-profile" not in sys.argv:
+            try:
+                import os
+                std_profile_path = os.path.join(os.path.dirname(__file__), 'types_profiles', 'std.json')
+                if os.path.isfile(std_profile_path) and std_profile_path not in cfg.types_profiles:
+                    cfg.types_profiles.append(std_profile_path)
+            except Exception:
+                pass
         pipe = BuildPipeline(config=cfg)
         j = load_json(inp)
         artifacts = pipe.build(j)

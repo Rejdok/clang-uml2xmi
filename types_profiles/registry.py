@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
+import json
+import os
 
 
 @dataclass
@@ -9,6 +11,7 @@ class ContainerProps:
     multiplicity: str
     aggregation: str
     end_name: Optional[str] = None
+    end_names: Optional[List[str]] = None
 
 
 @dataclass
@@ -51,6 +54,7 @@ class TypeLibRegistry:
                 multiplicity=c.get("multiplicity", "*"),
                 aggregation=c.get("aggregation", "none"),
                 end_name=c.get("end_name"),
+                end_names=c.get("end_names"),
             )
         return None
 
@@ -65,4 +69,25 @@ class TypeLibRegistry:
             )
         return None
 
+
+def _load_single_profile(path: str) -> Dict[str, Any]:
+    with open(path, 'r', encoding='utf-8') as f:
+        if path.lower().endswith(('.yml', '.yaml')):
+            try:
+                import yaml  # type: ignore
+            except Exception as e:
+                raise RuntimeError(f"YAML profile provided but PyYAML not installed: {path}") from e
+            return yaml.safe_load(f) or {}
+        return json.load(f)
+
+
+def load_profiles(paths: List[str]) -> TypeLibRegistry:
+    profiles: List[Dict[str, Any]] = []
+    for p in paths:
+        if not p:
+            continue
+        if not os.path.isfile(p):
+            raise FileNotFoundError(f"Type profile file not found: {p}")
+        profiles.append(_load_single_profile(p))
+    return TypeLibRegistry(profiles)
 

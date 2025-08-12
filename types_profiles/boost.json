@@ -1,0 +1,21 @@
+{
+  "aliases": {
+    "shared_ptr": "boost::shared_ptr",
+    "weak_ptr": "boost::weak_ptr",
+    "scoped_ptr": "boost::scoped_ptr"
+  },
+  "rules": [
+    {
+      "match": { "base": ["boost::shared_ptr", "boost::weak_ptr"] },
+      "classify": "pointer",
+      "pointer": { "ownership": "shared", "aggregation": "shared" }
+    },
+    {
+      "match": { "base": ["boost::scoped_ptr"] },
+      "classify": "pointer",
+      "pointer": { "ownership": "exclusive", "aggregation": "composite" }
+    }
+  ]
+}
+
+

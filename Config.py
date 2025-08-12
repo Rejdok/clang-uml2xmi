@@ -69,7 +69,8 @@ class GeneratorConfig:
     enable_template_binding: bool = True   # If true, materialize instantiations with templateBinding
     strict_validation: bool = False        # If true, fail generation on validation issues
     
-    # Placeholder for future type system profiles (disabled)
+    # Type system profiles (JSON/YAML) for containers/pointers classification
+    types_profiles: Optional[list[str]] = None
     
     def __post_init__(self):
         """Initialize default configurations if not provided."""

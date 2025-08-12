@@ -1,7 +1,7 @@
 uml2papyrus (refactored)
 
 Overview
-This project converts clang-uml JSON into Papyrus UML/XMI. The codebase has been refactored into a layered architecture to improve modularity and extensibility.
+This project converts clang-uml JSON into Papyrus UML/XMI. 
 
 Layout
 - meta/: XMI/UML meta-models (XmlMetaModel, UmlMetaModel, DEFAULT_META)
@@ -22,7 +22,7 @@ Layout
 
 Usage
 CLI:
-python cpp2uml.py --input input.json --out outdir
+python cpp2uml.py --input input.json --out outdir [--types-profile path1.json] [--types-profile path2.yaml] [--no-std-profile]
 
 Programmatic:
 from build.cpp.builder import CppModelBuilder
@@ -34,7 +34,8 @@ from build.pipeline import BuildPipeline
 artifacts = BuildPipeline().build(json_data)
 
 Notes
-- Type profiles (declarative container/pointer rules) are scaffolded in types_profiles/ but disabled for now.
+- Type profiles (declarative container/pointer rules) are supported via `--types-profile path.json|yaml`; multiple flags allowed. When provided, the association phase is re-applied using registry rules.
+- A default std profile is applied automatically unless `--no-std-profile` is passed.
 - Legacy `CppModelBuilder.py` was removed; use `build.cpp.builder.CppModelBuilder`.
 
 
