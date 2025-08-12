@@ -190,6 +190,34 @@ def test_template_parameter_extraction():
         else:
             assert is_instance is False
 
+def test_reference_and_variadic_cleaning():
+    """Types with references ("&", "&&") and packs ("...") should be normalized in names.
+    Ensures builder doesn't produce element names with these suffixes.
+    """
+    from CppModelBuilder import CppModelBuilder
+
+    mock = {
+        "elements": [
+            {"name": "sink_ptr", "kind": "class"},
+            {"name": "Consumer", "kind": "class", "members": [
+                {"name": "v1", "type": "std::vector<sink_ptr> &"},
+                {"name": "v2", "type": "std::vector<sink_ptr&&>"},
+                {"name": "args", "type": "Args &&..."}
+            ]}
+        ]
+    }
+
+    b = CppModelBuilder(mock, enable_template_binding=True)
+    res = b.build()
+
+    # No element name should contain reference/pack artifacts
+    bad = [str(n) for n in res['created'].keys() if any(x in str(n) for x in ['&&', '...', ' &'])]
+    assert not bad, f"Unexpected artifacts in element names: {bad}"
+
+    # There should be an instantiation element for vector<sink_ptr>
+    inst_names = [str(n) for n in res['created'].keys() if str(n).startswith('std::vector<')]
+    assert any('vector<' in n and 'sink_ptr' in n for n in inst_names)
+
 if __name__ == "__main__":
     test_complex_template_inheritance()
     test_template_associations()

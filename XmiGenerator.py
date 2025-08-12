@@ -18,8 +18,6 @@ from CppParser import CppTypeParser
 
 from uml_types import TypedDict
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Type aliases for better readability
@@ -76,6 +74,24 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
                 template_id: str = stable_id(xmi + ":template:" + str(i))
                 self.writer.write_template_parameter(template_id, template_param)
             self.writer.end_template_signature()
+
+        # Write template binding for instantiation elements (guarded)
+        inst_of = getattr(info, 'instantiation_of', None)
+        inst_args = getattr(info, 'instantiation_args', []) or []
+        if inst_of and isinstance(inst_args, list) and inst_args and all(arg is not None for arg in inst_args):
+            # Verify base template has a signature (i.e., base element is a template)
+            base_elem = None
+            try:
+                base_elem = self.model.elements.get(inst_of)  # type: ignore[attr-defined]
+            except Exception:
+                base_elem = None
+            has_signature = bool(base_elem and getattr(base_elem, 'templates', None))
+            if has_signature:
+                signature_ref: XmiId = XmiId(stable_id(str(inst_of) + ":templateSignature"))
+                try:
+                    self.writer.write_template_binding(stable_id(xmi + ":binding"), signature_ref, inst_args)  # type: ignore[arg-type]
+                except Exception as e:
+                    logger.warning(f"Skip templateBinding for '{name}': {e}")
         
         # Write generalizations as owned elements - XMI 2.1 compliant
         generalizations = getattr(self.model, "generalizations", []) or []
@@ -109,7 +125,7 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
             
             # Add return type if exists
             if return_type_ref:
-                self.writer.write_operation_return_type(return_type_ref)
+                self.writer.write_operation_return_type(op_id, return_type_ref)
             
             # Add parameters - XMI 2.1 compliant
             for param_name, param_type in op.parameters:

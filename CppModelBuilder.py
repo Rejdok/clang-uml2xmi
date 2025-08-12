@@ -668,21 +668,26 @@ class CppModelBuilder:
                         tname = expr.get("name")
                         if not tname:
                             return []
-                        xmi = self.name_to_xmi.get(ElementName(tname))
+                        # Normalize name: strip pointers/refs/CV and skip packs
+                        an_name: Dict[str, Any] = CppTypeParser.analyze_type_expr(tname)
+                        clean_name: str = an_name.get("base") or ""
+                        if not clean_name or "..." in clean_name:
+                            return []
+                        xmi = self.name_to_xmi.get(ElementName(clean_name))
                         if not xmi:
                             # Create stub if needed
-                            stub_id: XmiId = XmiId(stable_id(f"stub:{tname}"))
-                            self.name_to_xmi[ElementName(tname)] = stub_id
+                            stub_id: XmiId = XmiId(stable_id(f"stub:{clean_name}"))
+                            self.name_to_xmi[ElementName(clean_name)] = stub_id
                             stub_element: UmlElement = UmlElement(
                                 xmi=stub_id,
-                                name=ElementName(tname),
+                                name=ElementName(clean_name),
                                 kind=ElementKind.DATATYPE,
                                 members=[],
                                 clang=ClangMetadata(),
                                 used_types=frozenset(),
                                 underlying=None
                             )
-                            self.created[ElementName(tname)] = stub_element
+                            self.created[ElementName(clean_name)] = stub_element
                             valid_xmi_ids.add(stub_id)
                             xmi = stub_id
                         return [xmi]
@@ -698,7 +703,13 @@ class CppModelBuilder:
 
                         if self.enable_template_binding and base_xmis:
                             # Materialize instantiation element
-                            canonical = base + "<" + ", ".join([str(a) for a in arg_ids]) + ">"
+                            # Build readable canonical name using simple arg names
+                            arg_names: List[str] = []
+                            for aid in arg_ids:
+                                elem = next((e for e in self.created.values() if e.xmi == aid), None)
+                                if elem:
+                                    arg_names.append(self.extract_simple_name(str(elem.name)))
+                            canonical = base + ("<" + ", ".join(arg_names) + ">" if arg_names else "")
                             inst_name = ElementName(canonical)
                             inst_xmi: Optional[XmiId] = self.name_to_xmi.get(inst_name)
                             if not inst_xmi:

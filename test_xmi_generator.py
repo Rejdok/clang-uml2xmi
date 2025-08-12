@@ -185,7 +185,7 @@ def test_xmi_generator():
             pass
 
 def test_template_binding_generation():
-    """Ensure templateBinding is generated for template instantiations when enabled."""
+    """Ensure template instantiation element is generated (with default binding disabled in writer)."""
     import tempfile, os
     from CppModelBuilder import CppModelBuilder
     from UmlModel import UmlModel as UmlCoreModel
@@ -215,32 +215,133 @@ def test_template_binding_generation():
     with tempfile.NamedTemporaryFile(mode='w', suffix='.xmi', delete=False) as tmp:
         path = tmp.name
     try:
-        gen = XmiGenerator(model, enable_template_binding=True)
+        gen = XmiGenerator(model)
         gen.write(path, "TBProject")
 
         tree = etree.parse(path)
         root = tree.getroot()
-        # Find any templateBinding elements
-        bindings = root.findall('.//templateBinding')
-        assert bindings, "templateBinding not generated"
-        # Validate signature and parameterSubstitution
-        xmi_ns = 'http://www.omg.org/XMI'
-        found_valid = False
-        for b in bindings:
-            sig = b.find('signature')
-            subs = b.findall('parameterSubstitution')
-            if sig is not None and subs:
-                # signature should have xmi:idref
-                if f'{{{xmi_ns}}}idref' in sig.attrib:
-                    # at least one substitution with actual/@xmi:idref
-                    for sub in subs:
-                        actual = sub.find('actual')
-                        if actual is not None and f'{{{xmi_ns}}}idref' in actual.attrib:
-                            found_valid = True
-                            break
-            if found_valid:
+        # Find instantiation packaged element (name contains 'vector<' and ends with '>')
+        elems = root.findall('.//packagedElement')
+        names = [el.get('name') for el in elems if el.get('name')]
+        assert any(n and n.startswith('vector<') and n.endswith('>') for n in names), "Instantiation element not generated"
+    finally:
+        try:
+            os.unlink(path)
+        except:
+            pass
+
+def test_instantiation_namespace_structure():
+    """Instantiation packaged element should be placed under its namespace packages in XMI."""
+    import tempfile, os
+    from CppModelBuilder import CppModelBuilder
+    from UmlModel import UmlModel as UmlCoreModel
+
+    data = {
+        "elements": [
+            {"name": "std::vector", "display_name": "std::vector<T>", "is_template": True, "templates": ["T"], "kind": "class"},
+            {"name": "std::string", "display_name": "std::string", "kind": "class"},
+            {"name": "Client", "display_name": "Client", "kind": "class", "members": [
+                {"name": "list", "type": "std::vector<std::string>"}
+            ]}
+        ]
+    }
+
+    builder = CppModelBuilder(data, enable_template_binding=True)
+    prep = builder.build()
+    model = UmlCoreModel(
+        elements={elem.xmi: elem for elem in prep["created"].values()},
+        associations=prep["associations"],
+        dependencies=prep["dependencies"],
+        generalizations=prep.get("generalizations", []),
+        name_to_xmi=prep["name_to_xmi"]
+    )
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.xmi', delete=False) as tmp:
+        path = tmp.name
+    try:
+        gen = XmiGenerator(model)
+        gen.write(path, "NSProject")
+
+        tree = etree.parse(path)
+        root = tree.getroot()
+        # Find package 'std' (writer uses unqualified 'packagedElement' tag)
+        std_pkgs = root.findall('.//packagedElement[@name="std"]')
+        assert std_pkgs, "std package not created"
+        # Within std package, look for element name vector<...>
+        found = False
+        for p in std_pkgs:
+            inner = p.findall('.//packagedElement')
+            for el in inner:
+                n = el.get('name')
+                if n and n.startswith('vector<') and n.endswith('>'):
+                    found = True
+                    # Ensure no reference/variadic artifacts
+                    assert all(tok not in n for tok in ['&&', '...', ' &'])
+                    break
+            if found:
                 break
-        assert found_valid, "templateBinding missing signature/actual idrefs"
+        assert found, "Instantiation element not under std package"
+    finally:
+        try:
+            os.unlink(path)
+        except:
+            pass
+
+def test_template_binding_nested_and_multiargs():
+    """TemplateBinding should exist for multi-arg and nested templates (map<string, vector<int>>)."""
+    import tempfile, os
+    from CppModelBuilder import CppModelBuilder
+    from UmlModel import UmlModel as UmlCoreModel
+
+    data = {
+        "elements": [
+            {"name": "std::vector", "display_name": "std::vector<T>", "is_template": True, "templates": ["T"], "kind": "class"},
+            {"name": "std::map", "display_name": "std::map<K, V>", "is_template": True, "templates": ["K", "V"], "kind": "class"},
+            {"name": "std::string", "display_name": "std::string", "kind": "class"},
+            {"name": "int", "display_name": "int", "kind": "datatype"},
+            {"name": "Holder", "display_name": "Holder", "kind": "class", "members": [
+                {"name": "container", "type": "std::map<std::string, std::vector<int>>"}
+            ]}
+        ]
+    }
+
+    builder = CppModelBuilder(data, enable_template_binding=True)
+    prep = builder.build()
+    model = UmlCoreModel(
+        elements={elem.xmi: elem for elem in prep["created"].values()},
+        associations=prep["associations"],
+        dependencies=prep["dependencies"],
+        generalizations=prep.get("generalizations", []),
+        name_to_xmi=prep["name_to_xmi"]
+    )
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.xmi', delete=False) as tmp:
+        path = tmp.name
+    try:
+        gen = XmiGenerator(model)
+        gen.write(path, "TBDeep")
+
+        from lxml import etree
+        tree = etree.parse(path)
+        root = tree.getroot()
+
+        # find map<...> element and check it has templateBinding with >=2 substitutions
+        maps = [el for el in root.findall('.//packagedElement') if (el.get('name') or '').startswith('map<')]
+        assert maps, "map instantiation not generated"
+        map_el = maps[0]
+        bindings = map_el.findall('templateBinding')
+        assert bindings, "templateBinding for map not generated"
+        subs = bindings[0].findall('parameterSubstitution')
+        assert len(subs) >= 2, "map binding must have at least two substitutions"
+
+        # find vector<...> element and check it has templateBinding with 1 substitution
+        vecs = [el for el in root.findall('.//packagedElement') if (el.get('name') or '').startswith('vector<')]
+        assert vecs, "vector instantiation not generated"
+        vec_el = vecs[0]
+        vbindings = vec_el.findall('templateBinding')
+        assert vbindings, "templateBinding for vector not generated"
+        vsubs = vbindings[0].findall('parameterSubstitution')
+        assert len(vsubs) >= 1, "vector binding must have at least one substitution"
     finally:
         try:
             os.unlink(path)
