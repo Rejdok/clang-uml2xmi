@@ -57,7 +57,10 @@ class UmlElement:
     templates: List[str] = None  # List of template parameter names
     literals: List[str] = None  # List of enum literal names
     namespace: Optional[str] = None  # Namespace for this element
-    original_data: Optional[Dict[str, Union[str, int, bool, List[str]]]] = None  # Store original raw data with specific types
+    original_data: Optional[Dict[str, object]] = None  # Store original raw data with flexible structure
+    # Template instantiation (optional): if this element represents a bound template
+    instantiation_of: Optional[XmiId] = None
+    instantiation_args: List[XmiId] = None
     
     def __post_init__(self):
         if self.operations is None:
@@ -66,6 +69,8 @@ class UmlElement:
             self.templates = []
         if self.literals is None:
             self.literals = []
+        if self.instantiation_args is None:
+            self.instantiation_args = []
         
         # Validate that the kind matches the content
         self._validate_kind_content()
@@ -130,11 +135,14 @@ class UmlModel:
     dependencies: TypedList[Tuple[ElementName, TypeName]]  # (owner_name, type_name)
     generalizations: TypedList[UmlGeneralization]  # Updated: Use UmlGeneralization objects
     name_to_xmi: TypedDict[ElementName, XmiId]  # name -> XMI ID mapping
+    namespace_packages: Optional[TypedDict[str, XmiId]] = None  # NEW: namespace -> XMI ID mapping
     
     def __post_init__(self):
         """Initialize model after creation."""
         # Note: Validation is deferred until explicitly requested
         # to allow for incremental model building
+        if self.namespace_packages is None:
+            self.namespace_packages = {}
     
     def _validate_model_consistency(self) -> None:
         """Validate that the model is internally consistent."""

@@ -53,7 +53,7 @@ class Cpp2UmlApp:
 
     def run(self):
         j = load_json(self.in_json)
-        builder = CppModelBuilder(j)
+        builder = CppModelBuilder(j, enable_template_binding=self.config.__dict__.get('enable_template_binding', True))
         prep = builder.build()
 
         # Build UmlModel structure
@@ -74,7 +74,11 @@ class Cpp2UmlApp:
         self.config.project_name = project_name
 
         # XMI generation
-        xmi_gen = XmiGenerator(model)
+        xmi_gen = XmiGenerator(
+            model,
+            enable_template_binding=self.config.__dict__.get('enable_template_binding', True),
+            strict_validation=self.config.__dict__.get('strict_validation', False)
+        )
         xmi_gen.write(self.out_uml, project_name)
 
         # Notation generation (Papyrus minimal) using configuration and model

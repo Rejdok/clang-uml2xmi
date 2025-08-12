@@ -32,13 +32,67 @@ class CppTypeParser:
         s = s or ""
         s = re.sub(r'\b(const|volatile|mutable)\b', '', s)
         s = re.sub(r'\s+', ' ', s).strip()
+        # Remove simple macro noise/trailing blocks like " > {}" or trailing braces
+        # 1) Trim trailing empty brace blocks after templates: e.g., "...> {}" -> "...>"
+        s = re.sub(r'(>)\s*\{\s*\}\s*$', r'\1', s)
+        # 2) Remove one trailing top-level brace block at the end: "... { ... }" -> "..."
+        s = re.sub(r'\s*\{[^{}]*\}\s*$', '', s)
+        # 3) Drop trailing semicolons and following text on the same line
+        s = re.sub(r';[^\n]*$', '', s)
         return s
+
+    @staticmethod
+    def parse_type_expr(type_str: Optional[str], _depth_limit: int = 12) -> Dict[str, Any]:
+        """Parse a C++ type string into a simple AST-like dict structure.
+
+        Kinds:
+          - name: { kind: 'name', name: str }
+          - template: { kind: 'template', base: str, args: [TypeExpr|Literal] }
+          - decltype: { kind: 'decltype', expr: str, inner: TypeExpr|None }
+          - literal: { kind: 'literal', value: str }
+        """
+        s: str = CppTypeParser.tokenize_type(type_str)
+        # Fast exits
+        if not s:
+            return {"kind": "name", "name": ""}
+
+        # decltype(...) handling
+        if s.startswith('decltype(') and s.endswith(')'):
+            inner_expr: str = s[9:-1]
+            inner = None
+            if _depth_limit > 0:
+                inner = CppTypeParser.parse_type_expr(inner_expr, _depth_limit - 1)
+            return {"kind": "decltype", "expr": s, "inner": inner}
+
+        # Try parse as template using existing routine
+        outer, args = CppTypeParser.parse_template_args(s)
+        if args:
+            parsed_args: List[Dict[str, Any]] = []
+            for a in args:
+                a_s = (a or '').strip()
+                if not a_s:
+                    continue
+                # Heuristic: detect obvious non-type (integral) arguments
+                if re.match(r'^[0-9]+[uUlLfF]*$', a_s):
+                    parsed_args.append({"kind": "literal", "value": a_s})
+                else:
+                    if _depth_limit > 0:
+                        parsed_args.append(CppTypeParser.parse_type_expr(a_s, _depth_limit - 1))
+            return {"kind": "template", "base": outer, "args": parsed_args}
+
+        # Fallback: simple name
+        return {"kind": "name", "name": s}
 
     @staticmethod
     def parse_template_args(type_str: str) -> Tuple[str, List[str]]:
         """Enhanced template argument parsing with better handling of complex templates."""
-        s: str = (type_str or "").strip()
+        s: str = CppTypeParser.tokenize_type(type_str)
         if not s:
+            return (s, [])
+        
+        # Special handling for decltype expressions
+        if s.startswith('decltype(') and s.endswith(')'):
+            # For decltype expressions, return the full expression as base with no template args
             return (s, [])
         
         depth: int = 0
@@ -62,13 +116,20 @@ class CppTypeParser:
                         depth -= 1
                         if depth == 0:
                             if cur.strip():
-                                args.append(cur.strip())
+                                # Only add valid template arguments
+                                arg = cur.strip()
+                                if CppTypeParser._is_valid_template_arg(arg):
+                                    args.append(arg)
                             i += 1
                             break
                         else:
                             cur += c
                     elif c == ',' and depth == 1:
-                        args.append(cur.strip())
+                        if cur.strip():
+                            # Only add valid template arguments
+                            arg = cur.strip()
+                            if CppTypeParser._is_valid_template_arg(arg):
+                                args.append(arg)
                         cur = ''
                     else:
                         cur += c
@@ -76,11 +137,38 @@ class CppTypeParser:
                 
                 # Clean up any remaining content
                 if cur.strip():
-                    args.append(cur.strip())
+                    arg = cur.strip()
+                    if CppTypeParser._is_valid_template_arg(arg):
+                        args.append(arg)
                 
-                return (outer, [a.strip() for a in args if a.strip()])
+                return (outer, args)
             i += 1
         return (s, [])
+
+    @staticmethod
+    def _is_valid_template_arg(arg: str) -> bool:
+        """Check if a template argument is valid and not a fragment."""
+        arg = arg.strip()
+        if not arg:
+            return False
+        
+        # Skip arguments that are just punctuation or operators
+        if re.match(r'^[^\w\s<>:]+$', arg):
+            return False
+        
+        # Skip arguments that are just partial expressions
+        if arg.count('<') != arg.count('>'):
+            return False
+        
+        # Skip arguments that are too short or look like fragments
+        if len(arg) < 2:
+            return False
+        
+        # Skip arguments that start with operators (except for some valid cases)
+        if re.match(r'^[^\w<]+', arg):
+            return False
+        
+        return True
 
     @staticmethod
     def extract_template_base(type_str: str) -> str:
@@ -118,27 +206,68 @@ class CppTypeParser:
 
     @classmethod
     def extract_all_type_identifiers(cls, type_str: Optional[str]) -> List[TypeToken]:
-        """Enhanced type identifier extraction with better template handling."""
+        """Enhanced type identifier extraction with better handling of templates."""
         out: List[TypeToken] = []
         s: str = cls.tokenize_type(type_str)
+        
+        # Special handling for decltype expressions
+        if s.startswith('decltype(') and s.endswith(')'):
+            # Extract the inner expression from decltype(...)
+            inner_expr = s[9:-1]  # Remove 'decltype(' and ')'
+            
+            # Parse the inner expression for type identifiers
+            inner_tokens = cls.extract_all_type_identifiers(inner_expr)
+            out.extend(inner_tokens)
+            
+            # Also add the decltype expression itself as a token
+            out.append({'name': s, 'raw': s})
+            return out
+        
         outer: str
         args: List[str]
         outer, args = cls.parse_template_args(s)
         
-        if outer:
+        if outer and cls._is_valid_type_name(outer):
             out.append({'name': outer, 'raw': outer})
         
         # Process template arguments more thoroughly
         for arg in args:
-            # Skip primitive types and simple identifiers
-            if arg in ['int', 'float', 'double', 'char', 'bool', 'void', 'string', 'std::string']:
-                continue
-            
+            # For template arguments, we want to include all types, including primitives
             # Extract type identifiers from complex template arguments
             arg_tokens = cls.extract_all_type_identifiers(arg)
             out.extend(arg_tokens)
+            
+            # If the argument is a simple type (not processed by extract_all_type_identifiers),
+            # add it as a token only if it's valid
+            if not arg_tokens and arg.strip() and cls._is_valid_type_name(arg.strip()):
+                out.append({'name': arg.strip(), 'raw': arg.strip()})
         
         return out
+
+    @staticmethod
+    def _is_valid_type_name(type_name: str) -> bool:
+        """Check if a type name is valid and not a fragment."""
+        type_name = type_name.strip()
+        if not type_name:
+            return False
+        
+        # Skip names that are just punctuation or operators
+        if re.match(r'^[^\w\s<>:]+$', type_name):
+            return False
+        
+        # Skip names that are too short
+        if len(type_name) < 2:
+            return False
+        
+        # Skip names that start with operators (except for some valid cases)
+        if re.match(r'^[^\w<]+', type_name):
+            return False
+        
+        # Skip names that are just partial expressions
+        if type_name.count('<') != type_name.count('>'):
+            return False
+        
+        return True
 
     @staticmethod
     def match_known_types_from_parsed(parsed_list: List[TypeToken], known_names: Union[List[str], Tuple[str, ...], set[str]]) -> List[str]:

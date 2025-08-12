@@ -64,6 +64,10 @@ class GeneratorConfig:
     
     # Project settings
     project_name: str = "GeneratedUML"
+
+    # Behavior flags
+    enable_template_binding: bool = True   # If true, materialize instantiations with templateBinding
+    strict_validation: bool = False        # If true, fail generation on validation issues
     
     def __post_init__(self):
         """Initialize default configurations if not provided."""

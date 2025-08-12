@@ -14,6 +14,7 @@ from UmlModel import (
 from XmiWriter import XmiWriter
 from Utils import stable_id, xml_text
 from Model import DEFAULT_MODEL
+from CppParser import CppTypeParser
 
 from uml_types import TypedDict
 
@@ -42,7 +43,7 @@ class XmiElementVisitor:
         raise NotImplementedError
 
 class UmlXmiWritingVisitor(XmiElementVisitor):
-    """Concrete visitor that writes UML elements to an XMI file."""
+    """Concrete visitor that writes UML elements to XMI 2.1 compliant format."""
     
     def __init__(self, writer: XmiWriter, name_to_xmi: Dict[ElementName, XmiId], model: UmlModel) -> None:
         self.writer: XmiWriter = writer
@@ -50,6 +51,7 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
         self.model: UmlModel = model
 
     def visit_class(self, info: UmlElement) -> None:
+        """Visit class element - XMI 2.1 compliant."""
         name: ElementName = info.name
         xmi: XmiId = info.xmi
         is_abstract: bool = bool(info.clang.is_abstract)
@@ -66,7 +68,7 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
         uml_model = DEFAULT_MODEL.uml
         self.writer.start_packaged_element(xmi, uml_model.class_type, short_name, is_abstract=is_abstract, extra_attrs=extra_attrs)
         
-        # Write template parameters if this is a template class
+        # Write template parameters if this is a template class - XMI 2.1 compliant
         if hasattr(info, 'templates') and info.templates:
             signature_id: str = stable_id(xmi + ":templateSignature")
             self.writer.start_template_signature(signature_id)
@@ -75,7 +77,7 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
                 self.writer.write_template_parameter(template_id, template_param)
             self.writer.end_template_signature()
         
-        # Write generalizations as owned elements
+        # Write generalizations as owned elements - XMI 2.1 compliant
         generalizations = getattr(self.model, "generalizations", []) or []
         for gen in generalizations:
             if gen.child_id == xmi:  # This generalization belongs to this class
@@ -87,6 +89,7 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
                     is_final=gen.is_final
                 )
         
+        # Write owned attributes - XMI 2.1 compliant
         for m in info.members:
             aid: str = stable_id(xmi + ":attr:" + m.name)
             tref: Optional[XmiId] = self.name_to_xmi.get(ElementName(m.type_repr)) if m.type_repr else None
@@ -95,6 +98,7 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
                 type_ref=tref, is_static=m.is_static
             )
         
+        # Write owned operations - XMI 2.1 compliant
         for op in info.operations:
             # Handle operations if they exist
             op_id: str = stable_id(xmi + ":op:" + op.name)
@@ -107,7 +111,7 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
             if return_type_ref:
                 self.writer.write_operation_return_type(return_type_ref)
             
-            # Add parameters
+            # Add parameters - XMI 2.1 compliant
             for param_name, param_type in op.parameters:
                 # Validate parameter data to prevent invalid direction values
                 if not isinstance(param_name, str) or not isinstance(param_type, str):
@@ -130,6 +134,7 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
         self.writer.end_packaged_element()
 
     def visit_enum(self, info: UmlElement) -> None:
+        """Visit enum element - XMI 2.1 compliant."""
         name: ElementName = info.name
         xmi: XmiId = info.xmi
         is_abstract: bool = bool(info.clang.is_abstract)
@@ -141,7 +146,7 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
         uml_model = DEFAULT_MODEL.uml
         self.writer.start_packaged_element(xmi, uml_model.enum_type, short_name, is_abstract=is_abstract)
         
-        # Handle literals if they exist
+        # Handle literals if they exist - XMI 2.1 compliant
         if hasattr(info, 'literals') and info.literals:
             for lit in info.literals:
                 lit_id: str = stable_id(xmi + ":literal:" + lit)
@@ -150,6 +155,7 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
         self.writer.end_packaged_element()
 
     def visit_datatype(self, info: UmlElement) -> None:
+        """Visit datatype element - XMI 2.1 compliant."""
         name: ElementName = info.name
         xmi: XmiId = info.xmi
         is_abstract: bool = bool(info.clang.is_abstract)
@@ -160,10 +166,13 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
         # Use UML model for element type
         uml_model = DEFAULT_MODEL.uml
         self.writer.start_packaged_element(xmi, uml_model.datatype_type, short_name, is_abstract=is_abstract)
+        
+        # Add generalization if underlying type exists - XMI 2.1 compliant
         if info.underlying:
             tref: Optional[XmiId] = self.name_to_xmi.get(ElementName(info.underlying))
             if tref:
                 self.writer.write_generalization(stable_id(xmi + ":gen"), tref)
+                
         self.writer.end_packaged_element()
 
 # -------------------- XMI Generator (Refactored) --------------------
@@ -206,6 +215,12 @@ class XmiGenerator:
         tree: NamespaceTree = {}
         logger.info(f"Building namespace tree for {len(elements)} elements")
         
+        # First, add pre-created namespace packages from UmlModel
+        if hasattr(self.model, 'namespace_packages') and self.model.namespace_packages:
+            for namespace_name, namespace_xmi in self.model.namespace_packages.items():
+                tree[namespace_name] = {'__namespace__': True, '__children__': {}, '__xmi_id__': namespace_xmi}
+                logger.debug(f"Added pre-created namespace: {namespace_name} -> {namespace_xmi}")
+        
         for q_name, info in elements.items():
             try:
                 # Convert ElementName to string for processing
@@ -216,33 +231,13 @@ class XmiGenerator:
                     tree[name_str] = info
                     logger.debug(f"Added root element: {name_str}")
                 else:
-                    # Namespaced element - need to handle template types carefully
-                    # Split by :: but be careful with template syntax like std::vector<int>
-                    parts: List[str] = []
-                    current_part = ""
-                    bracket_count = 0
-                    
-                    for char in name_str:
-                        if char == '<':
-                            bracket_count += 1
-                        elif char == '>':
-                            bracket_count -= 1
-                        elif char == ':' and bracket_count == 0:
-                            if current_part:
-                                parts.append(current_part)
-                                current_part = ""
-                            # Skip the second : in ::
-                            continue
-                        else:
-                            current_part += char
-                    
-                    if current_part:
-                        parts.append(current_part)
+                    # Namespaced element - simple namespace splitting
+                    parts = name_str.split('::')
                     
                     if len(parts) == 1:
-                        # No namespace separator found (template syntax interfered)
+                        # No namespace separator found
                         tree[name_str] = info
-                        logger.debug(f"Added template element: {name_str}")
+                        logger.debug(f"Added element without namespace: {name_str}")
                     else:
                         # Namespaced element
                         current: NamespaceTree = tree
@@ -313,7 +308,18 @@ class XmiGenerator:
         logger.info(f"Creating stub elements for {len(self.all_referenced_type_names)} referenced types")
         stub_count = 0
         
+        # Clean up extremely long type names to avoid issues
+        cleaned_type_names = set()
         for type_name in self.all_referenced_type_names:
+            if len(type_name) > 200:
+                # Truncate very long names
+                cleaned_name = type_name[:200] + "..."
+                logger.warning(f"Type name too long ({len(type_name)} chars), truncating: {cleaned_name}")
+                cleaned_type_names.add(cleaned_name)
+            else:
+                cleaned_type_names.add(type_name)
+        
+        for type_name in cleaned_type_names:
             # Skip if already created or if it's a primitive type
             if type_name in self.created or ElementName(type_name) in self.name_to_xmi:
                 continue
@@ -479,7 +485,14 @@ class XmiGenerator:
                 if isinstance(item, dict) and item.get('__namespace__'):
                     # This is a namespace
                     package_name: str = f"{parent_name}::{name}" if parent_name else name
-                    package_id: str = stable_id(f"package:{package_name}")
+                    
+                    # Use pre-created XMI ID if available, otherwise generate new one
+                    if '__xmi_id__' in item:
+                        package_id: str = str(item['__xmi_id__'])
+                        logger.debug(f"Using pre-created package ID: {package_id} for {package_name}")
+                    else:
+                        package_id: str = stable_id(f"package:{package_name}")
+                        logger.debug(f"Generated new package ID: {package_id} for {package_name}")
                     
                     logger.debug(f"Starting package: {package_name}")
                     # Start package using the visitor's writer
