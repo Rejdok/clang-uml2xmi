@@ -267,5 +267,3 @@ class CppTypeParser:
 
 
 __all__ = ["CppTypeParser"]
-
-рородолжай
