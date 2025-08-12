@@ -74,11 +74,7 @@ class Cpp2UmlApp:
         self.config.project_name = project_name
 
         # XMI generation
-        xmi_gen = XmiGenerator(
-            model,
-            enable_template_binding=self.config.__dict__.get('enable_template_binding', True),
-            strict_validation=self.config.__dict__.get('strict_validation', False)
-        )
+        xmi_gen = XmiGenerator(model)
         xmi_gen.write(self.out_uml, project_name)
 
         # Notation generation (Papyrus minimal) using configuration and model

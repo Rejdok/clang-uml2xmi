@@ -232,7 +232,7 @@ class XmiWriter:
         self.xf.write(el)
 
     def write_template_binding(self, binding_id: str, signature_ref: XmiId, arg_ids: List[XmiId]) -> None:
-        """Write templateBinding with parameterSubstitution entries."""
+        """Write templateBinding with parameterSubstitution entries as a child of current element."""
         binding_el = etree.Element("templateBinding", nsmap=self.config.uml_nsmap, **{
             self.config.xmi_id: binding_id,
             self.config.xmi_type: "uml:TemplateBinding",
@@ -249,7 +249,11 @@ class XmiWriter:
             etree.SubElement(sub_el, "actual", nsmap=self.config.uml_nsmap, **{
                 self.config.xmi_idref: str(aid)
             })
-        self.xf.write(binding_el)
+        # Attach to current context if available; otherwise write at top-level
+        if self._ctx_stack:
+            self._ctx_stack[-1].append(binding_el)
+        else:
+            self.xf.write(binding_el)
 
     def write_generalization(self, gid: str, general_ref: XmiId, inheritance_type: str = "public", is_virtual: bool = False, is_final: bool = False) -> None:
         """Write generalization element - XMI 2.1 compliant."""

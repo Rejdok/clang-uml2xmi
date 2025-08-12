@@ -57,10 +57,7 @@ class UmlElement:
     templates: List[str] = None  # List of template parameter names
     literals: List[str] = None  # List of enum literal names
     namespace: Optional[str] = None  # Namespace for this element
-    original_data: Optional[Dict[str, object]] = None  # Store original raw data with flexible structure
-    # Template instantiation (optional): if this element represents a bound template
-    instantiation_of: Optional[XmiId] = None
-    instantiation_args: List[XmiId] = None
+    original_data: Optional[Dict[str, Union[str, int, bool, List[str]]]] = None  # Store original raw data with specific types
     
     def __post_init__(self):
         if self.operations is None:
@@ -69,8 +66,6 @@ class UmlElement:
             self.templates = []
         if self.literals is None:
             self.literals = []
-        if self.instantiation_args is None:
-            self.instantiation_args = []
         
         # Validate that the kind matches the content
         self._validate_kind_content()

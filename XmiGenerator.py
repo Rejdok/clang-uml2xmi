@@ -324,18 +324,8 @@ class XmiGenerator:
         logger.info(f"Creating stub elements for {len(self.all_referenced_type_names)} referenced types")
         stub_count = 0
         
-        # Clean up extremely long type names to avoid issues
-        cleaned_type_names = set()
+        # Keep type names as-is (no truncation, no warnings)
         for type_name in self.all_referenced_type_names:
-            if len(type_name) > 200:
-                # Truncate very long names
-                cleaned_name = type_name[:200] + "..."
-                logger.warning(f"Type name too long ({len(type_name)} chars), truncating: {cleaned_name}")
-                cleaned_type_names.add(cleaned_name)
-            else:
-                cleaned_type_names.add(type_name)
-        
-        for type_name in cleaned_type_names:
             # Skip if already created or if it's a primitive type
             if type_name in self.created or ElementName(type_name) in self.name_to_xmi:
                 continue
