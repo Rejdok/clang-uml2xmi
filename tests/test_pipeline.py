@@ -58,7 +58,7 @@ def test_build_pipeline_generates_files():
         for p in (out_uml, out_notation):
             try:
                 os.unlink(p)
-            except Exception:
+            except FileNotFoundError:
                 pass
 
 

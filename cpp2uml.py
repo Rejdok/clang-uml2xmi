@@ -30,7 +30,7 @@ try:
     def load_json(path: str) -> Any:
         with open(path, "rb") as f:
             return _orjson.loads(f.read())
-except Exception:
+except ImportError:
     def load_json(path: str) -> Any:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -129,6 +129,7 @@ def main():
     try:
         configure_logging()
     except Exception:
+        # Don't fail CLI just because logging couldn't be configured
         pass
 
     # Parse CLI with optional flags
@@ -142,11 +143,13 @@ def main():
         j = load_json(inp)
         from build.cpp.builder import CppModelBuilder as PhaseBuilder
         pb = PhaseBuilder(j, enable_template_binding=cfg.enable_template_binding)
-        phases = []
         try:
             phases = pb.get_phases()  # type: ignore[attr-defined]
-        except Exception:
+        except AttributeError:
             phases = []
+        except Exception as e:
+            print(f"Failed to list phases: {e}")
+            return 1
         if phases:
             print("Phases:")
             for i, ph in enumerate(phases, 1):
@@ -162,20 +165,17 @@ def main():
         if cfg.types_profiles is None:
             cfg.types_profiles = []
         if "--no-std-profile" not in sys.argv:
-            try:
-                import os
-                std_profile_path = os.path.join(os.path.dirname(__file__), 'types_profiles', 'std.json')
-                if os.path.isfile(std_profile_path) and std_profile_path not in cfg.types_profiles:
-                    cfg.types_profiles.append(std_profile_path)
-            except Exception:
-                pass
+            import os
+            std_profile_path = os.path.join(os.path.dirname(__file__), 'types_profiles', 'std.json')
+            if os.path.isfile(std_profile_path) and std_profile_path not in cfg.types_profiles:
+                cfg.types_profiles.append(std_profile_path)
         pipe = BuildPipeline(config=cfg)
         j = load_json(inp)
         artifacts = pipe.build(j)
         pipe.generate(artifacts, out_uml, out_notation)
         print("Written", out_uml, "and", out_notation)
     except Exception:
-        # Execute CLI app
+        # Execute CLI app fallback if pipeline not available
         app = Cpp2UmlApp(inp, out_uml, out_notation, config=cfg)
         app.run()
     return 0

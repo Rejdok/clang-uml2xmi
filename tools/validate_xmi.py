@@ -51,8 +51,8 @@ def find_unresolved(root: etree._Element, ids: set[str], limit: int) -> List[Tup
 def print_context(path: str, target: str, around: int) -> None:
     try:
         lines = io.open(path, "r", encoding="utf-8", errors="ignore").read().splitlines()
-    except Exception:
-        print("<context unavailable>")
+    except OSError as e:
+        print(f"<context unavailable: {e}>")
         return
     for i, line in enumerate(lines):
         if target in line:
@@ -80,7 +80,7 @@ def main() -> int:
     parser = etree.XMLParser(recover=True)
     try:
         tree = etree.parse(args.xmi_path, parser)
-    except Exception as e:
+    except etree.XMLSyntaxError as e:
         print(f"XML parse error: {e}")
         return 3
     root = tree.getroot()

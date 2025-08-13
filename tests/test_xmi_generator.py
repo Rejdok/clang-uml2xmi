@@ -11,6 +11,7 @@ from uml_types import ElementKind
 from gen.xmi.generator import XmiGenerator
 from gen.xmi.writer import XmiWriter
 from lxml import etree
+import pytest
 
 # Configure logging for testing
 logging.basicConfig(level=logging.DEBUG)
@@ -171,7 +172,7 @@ def test_xmi_generator():
         finally:
             try:
                 os.unlink(path2)
-            except:
+            except FileNotFoundError:
                 pass
             
     except Exception as e:
@@ -184,7 +185,7 @@ def test_xmi_generator():
         try:
             os.unlink(output_path)
             print("Temporary file cleaned up")
-        except:
+        except FileNotFoundError:
             pass
 
 def test_template_binding_generation():
@@ -349,6 +350,232 @@ def test_template_binding_nested_and_multiargs():
         try:
             os.unlink(path)
         except:
+            pass
+
+def test_member_end_idrefs_match_owned_ends():
+    """Association.memberEnd must reference actual ownedEnd xmi:id (no empty refs)."""
+    import tempfile, os
+    from core.uml_model import UmlElement, UmlModel, UmlAssociation, ClangMetadata, XmiId, ElementName
+    from uml_types import ElementKind
+    from gen.xmi.generator import XmiGenerator
+    from lxml import etree
+    
+    # Build minimal model with association
+    a = UmlElement(
+        xmi=XmiId("A"),
+        name=ElementName("A"),
+        kind=ElementKind.CLASS,
+        members=[],
+        clang=ClangMetadata(),
+        used_types=frozenset(),
+        underlying=None,
+    )
+    b = UmlElement(
+        xmi=XmiId("B"),
+        name=ElementName("B"),
+        kind=ElementKind.CLASS,
+        members=[],
+        clang=ClangMetadata(),
+        used_types=frozenset(),
+        underlying=None,
+    )
+    assoc = UmlAssociation(src=a.xmi, tgt=b.xmi, name="rel")
+    model = UmlModel(
+        elements={a.xmi: a, b.xmi: b},
+        associations=[assoc],
+        dependencies=[],
+        generalizations=[],
+        name_to_xmi={a.name: a.xmi, b.name: b.xmi},
+    )
+    
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.xmi', delete=False) as tmp:
+        path = tmp.name
+    try:
+        gen = XmiGenerator(model)
+        gen.write(path, "Proj")
+        tree = etree.parse(path)
+        root = tree.getroot()
+        xmi_ns = 'http://www.omg.org/XMI'
+        assoc_els = root.findall('.//packagedElement[@xmi:type="uml:Association"]', namespaces={'xmi': xmi_ns})
+        assert assoc_els, "Association element not found"
+        ae = assoc_els[0]
+        ends = ae.findall('ownedEnd')
+        assert len(ends) == 2, "Association must have exactly two ownedEnd"
+        end_ids = [e.get(f'{{{xmi_ns}}}id') for e in ends]
+        assert all(end_ids), "ownedEnd must have non-empty xmi:id"
+        mrefs = [me.get(f'{{{xmi_ns}}}idref') for me in ae.findall('memberEnd')]
+        assert len(mrefs) == 2, "Association must have two memberEnd references"
+        assert set(mrefs) == set(end_ids), "memberEnd idrefs must match ownedEnd xmi:id"
+    finally:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+
+def test_member_end_broken_idref_is_detected_as_error():
+    """If memberEnd does not refer to existing ownedEnd, validation must detect error."""
+    import tempfile, os
+    from core.uml_model import UmlElement, UmlModel, UmlAssociation, ClangMetadata, XmiId, ElementName
+    from uml_types import ElementKind
+    from gen.xmi.generator import XmiGenerator
+    from lxml import etree
+    from tools.validate_xmi import collect_ids, find_unresolved
+
+    a = UmlElement(
+        xmi=XmiId("A2"),
+        name=ElementName("A2"),
+        kind=ElementKind.CLASS,
+        members=[],
+        clang=ClangMetadata(),
+        used_types=frozenset(),
+        underlying=None,
+    )
+    b = UmlElement(
+        xmi=XmiId("B2"),
+        name=ElementName("B2"),
+        kind=ElementKind.CLASS,
+        members=[],
+        clang=ClangMetadata(),
+        used_types=frozenset(),
+        underlying=None,
+    )
+    assoc = UmlAssociation(src=a.xmi, tgt=b.xmi, name="rel")
+    model = UmlModel(
+        elements={a.xmi: a, b.xmi: b},
+        associations=[assoc],
+        dependencies=[],
+        generalizations=[],
+        name_to_xmi={a.name: a.xmi, b.name: b.xmi},
+    )
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.xmi', delete=False) as tmp:
+        path = tmp.name
+    try:
+        gen = XmiGenerator(model)
+        gen.write(path, "Proj2")
+        # Break one memberEnd reference
+        parser = etree.XMLParser(remove_blank_text=True)
+        tree = etree.parse(path, parser)
+        root = tree.getroot()
+        ns = {'xmi': 'http://www.omg.org/XMI'}
+        assoc_els = root.findall('.//packagedElement[@xmi:type="uml:Association"]', namespaces=ns)
+        assert assoc_els
+        ae = assoc_els[0]
+        mes = ae.findall('memberEnd')
+        assert len(mes) == 2
+        mes[0].set('{http://www.omg.org/XMI}idref', 'id_nonexistent')
+        # Validate unresolved idrefs
+        ids = collect_ids(root)
+        unresolved = find_unresolved(root, ids, limit=5)
+        assert unresolved and any(rid == 'id_nonexistent' for rid, _ in unresolved)
+    finally:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+
+def test_generalization_missing_parent_detected():
+    """generalization/@general should reference existing element; broken ref -> unresolved."""
+    import tempfile, os
+    from core.uml_model import UmlElement, UmlModel, UmlGeneralization, ClangMetadata, XmiId, ElementName
+    from uml_types import ElementKind
+    from gen.xmi.generator import XmiGenerator
+    from lxml import etree
+    from tools.validate_xmi import collect_ids, find_unresolved
+
+    base = UmlElement(xmi=XmiId("Base"), name=ElementName("Base"), kind=ElementKind.CLASS, members=[], clang=ClangMetadata(), used_types=frozenset(), underlying=None)
+    derived = UmlElement(xmi=XmiId("Derived"), name=ElementName("Derived"), kind=ElementKind.CLASS, members=[], clang=ClangMetadata(), used_types=frozenset(), underlying=None)
+    gen = UmlGeneralization(child_id=derived.xmi, parent_id=base.xmi)
+    model = UmlModel(elements={base.xmi: base, derived.xmi: derived}, associations=[], dependencies=[], generalizations=[gen], name_to_xmi={base.name: base.xmi, derived.name: derived.xmi})
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.xmi', delete=False) as tmp:
+        path = tmp.name
+    try:
+        # Generate then break parent id
+        XmiGenerator(model).write(path, "GProj")
+        parser = etree.XMLParser(remove_blank_text=True)
+        tree = etree.parse(path, parser)
+        root = tree.getroot()
+        gens = root.findall('.//generalization')
+        assert gens
+        gens[0].set('general', 'id_nonexistent')
+        ids = collect_ids(root)
+        unresolved = find_unresolved(root, ids, limit=5)
+        assert any(rid == 'id_nonexistent' for rid, _ in unresolved)
+    finally:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+
+def test_owned_parameter_missing_type_detected():
+    """ownedParameter/@type broken should be detected as unresolved idref."""
+    import tempfile, os
+    from core.uml_model import UmlElement, UmlModel, UmlOperation, ClangMetadata, XmiId, ElementName
+    from uml_types import ElementKind, Visibility
+    from gen.xmi.generator import XmiGenerator
+    from lxml import etree
+    from tools.validate_xmi import collect_ids, find_unresolved
+
+    foo = UmlElement(xmi=XmiId("Foo"), name=ElementName("Foo"), kind=ElementKind.CLASS, members=[], clang=ClangMetadata(), used_types=frozenset(), underlying=None)
+    # add operation with parameter to get an ownedParameter
+    from core.uml_model import UmlOperation as Op
+    op = Op(name="bar", return_type=None, parameters=[("p", "Foo")], visibility=Visibility.PUBLIC)
+    foo.operations = [op]
+    model = UmlModel(elements={foo.xmi: foo}, associations=[], dependencies=[], generalizations=[], name_to_xmi={foo.name: foo.xmi})
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.xmi', delete=False) as tmp:
+        path = tmp.name
+    try:
+        XmiGenerator(model).write(path, "PProj")
+        parser = etree.XMLParser(remove_blank_text=True)
+        tree = etree.parse(path, parser)
+        root = tree.getroot()
+        params = root.findall('.//ownedParameter')
+        assert params
+        # find the input parameter (not the return)
+        param = next(p for p in params if p.get('direction', 'in') == 'in')
+        param.set('type', 'id_nonexistent')
+        ids = collect_ids(root)
+        unresolved = find_unresolved(root, ids, limit=5)
+        assert any(rid == 'id_nonexistent' for rid, _ in unresolved)
+    finally:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+
+def test_dependency_missing_client_or_supplier_detected():
+    """Dependency client/supplier broken should be detected as unresolved idref."""
+    import tempfile, os
+    from core.uml_model import UmlElement, UmlModel, ClangMetadata, XmiId, ElementName
+    from uml_types import ElementKind
+    from gen.xmi.generator import XmiGenerator
+    from lxml import etree
+    from tools.validate_xmi import collect_ids, find_unresolved
+
+    a = UmlElement(xmi=XmiId("DA"), name=ElementName("DA"), kind=ElementKind.CLASS, members=[], clang=ClangMetadata(), used_types=frozenset(), underlying=None)
+    b = UmlElement(xmi=XmiId("DB"), name=ElementName("DB"), kind=ElementKind.CLASS, members=[], clang=ClangMetadata(), used_types=frozenset(), underlying=None)
+    model = UmlModel(elements={a.xmi: a, b.xmi: b}, associations=[], dependencies=[(a.name, b.name)], generalizations=[], name_to_xmi={a.name: a.xmi, b.name: b.xmi})
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.xmi', delete=False) as tmp:
+        path = tmp.name
+    try:
+        XmiGenerator(model).write(path, "DProj")
+        parser = etree.XMLParser(remove_blank_text=True)
+        tree = etree.parse(path, parser)
+        root = tree.getroot()
+        deps = root.findall('.//packagedElement[@xmi:type="uml:Dependency"]', namespaces={'xmi': 'http://www.omg.org/XMI'})
+        assert deps, "Dependency element not found"
+        dep = deps[0]
+        dep.set('client', 'id_nonexistent')
+        ids = collect_ids(root)
+        unresolved = find_unresolved(root, ids, limit=5)
+        assert any(rid == 'id_nonexistent' for rid, _ in unresolved)
+    finally:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
             pass
 
 if __name__ == "__main__":

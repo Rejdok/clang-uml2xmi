@@ -20,18 +20,22 @@ import os
 from typing import Any
 
 from app.config import GeneratorConfig, DEFAULT_CONFIG
+import logging
 from utils.logging_config import configure_logging
 
 
 def load_json(path: str) -> Any:
+    # Prefer orjson if available; fall back to stdlib json
     try:
         import orjson  # type: ignore
+    except ImportError:
+        orjson = None  # type: ignore
+    if orjson is not None:
         with open(path, "rb") as f:
             return orjson.loads(f.read())
-    except Exception:
-        import json
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+    import json
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 def parse_cli(argv: list[str], config: GeneratorConfig) -> tuple[str, str, str, GeneratorConfig]:
@@ -74,8 +78,10 @@ def main(argv: list[str] | None = None) -> int:
     argv = argv or sys.argv
     try:
         configure_logging()
-    except Exception:
-        pass
+    except Exception as e:
+        # Fallback to a basic configuration and continue
+        logging.basicConfig(level=logging.INFO)
+        logging.getLogger(__name__).warning("Logging configuration failed: %s", e)
 
     try:
         inp, out_uml, out_notation, cfg = parse_cli(argv, DEFAULT_CONFIG)
@@ -87,11 +93,13 @@ def main(argv: list[str] | None = None) -> int:
         j = load_json(inp)
         from build.cpp.builder import CppModelBuilder as PhaseBuilder
         pb = PhaseBuilder(j, enable_template_binding=cfg.enable_template_binding)
-        phases = []
         try:
             phases = pb.get_phases()  # type: ignore[attr-defined]
-        except Exception:
+        except AttributeError:
             phases = []
+        except Exception as e:
+            print(f"Failed to list phases: {e}")
+            return 1
         if phases:
             print("Phases:")
             for i, ph in enumerate(phases, 1):

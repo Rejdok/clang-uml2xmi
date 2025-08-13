@@ -140,7 +140,7 @@ def test_namespace_names():
         try:
             os.unlink(output_path)
             print("Temporary file cleaned up")
-        except:
+        except FileNotFoundError:
             pass
 
 if __name__ == "__main__":

@@ -242,45 +242,35 @@ class XmiWriter:
     def write_template_binding(self, binding_id: str, signature_ref: XmiId, arg_ids: List[XmiId]) -> None:
         """Write templateBinding with parameterSubstitution entries as a child of current element."""
         # Nest within current open packagedElement using xmlfile contexts
-        tb_ctx = self.xf.element(
+        with self.xf.element(
             "templateBinding",
             nsmap=self.config.uml_nsmap,
             **{
                 self.config.xmi_id: binding_id,
                 self.config.xmi_type: "uml:TemplateBinding",
             },
-        )
-        tb_ctx.__enter__()
-        try:
+        ):
             # signature reference
-            sig_ctx = self.xf.element(
+            with self.xf.element(
                 "signature",
                 nsmap=self.config.uml_nsmap,
                 **{self.config.xmi_idref: str(signature_ref)},
-            )
-            sig_ctx.__enter__()
-            sig_ctx.__exit__(None, None, None)
+            ):
+                pass
 
             # substitutions
             for i, aid in enumerate(arg_ids):
-                ps_ctx = self.xf.element(
+                with self.xf.element(
                     "parameterSubstitution",
                     nsmap=self.config.uml_nsmap,
                     **{self.config.xmi_id: stable_id(binding_id + f":sub:{i}")},
-                )
-                ps_ctx.__enter__()
-                try:
-                    actual_ctx = self.xf.element(
+                ):
+                    with self.xf.element(
                         "actual",
                         nsmap=self.config.uml_nsmap,
                         **{self.config.xmi_idref: str(aid)},
-                    )
-                    actual_ctx.__enter__()
-                    actual_ctx.__exit__(None, None, None)
-                finally:
-                    ps_ctx.__exit__(None, None, None)
-        finally:
-            tb_ctx.__exit__(None, None, None)
+                    ):
+                        pass
 
     def write_generalization(self, gid: str, general_ref: XmiId, inheritance_type: str = "public", is_virtual: bool = False, is_final: bool = False) -> None:
         """Write generalization element - XMI 2.1 compliant."""
@@ -393,11 +383,16 @@ class XmiWriter:
             add_bound_value(end2_el, "upperValue", "1")
 
         # Add memberEnd references to the association (XMI: idref to the ends)
+        # Use the actual ids assigned on the ownedEnd elements to avoid inconsistencies
+        end1_assigned_id = end1_el.get(self.config.xmi_id) or ""
+        end2_assigned_id = end2_el.get(self.config.xmi_id) or ""
+        if not end1_assigned_id or not end2_assigned_id:
+            raise ValueError("Association ownedEnd missing xmi:id; cannot create memberEnd references")
         etree.SubElement(assoc_el, "memberEnd", attrib={
-            self.config.xmi_idref: end1_id
+            self.config.xmi_idref: end1_assigned_id
         }, nsmap=self.config.uml_nsmap)
         etree.SubElement(assoc_el, "memberEnd", attrib={
-            self.config.xmi_idref: end2_id
+            self.config.xmi_idref: end2_assigned_id
         }, nsmap=self.config.uml_nsmap)
 
         # Write the complete association

@@ -7,6 +7,7 @@ Generates XMI files from UML model data.
 import logging
 from typing import Dict, Any, List, Set, Optional, Union
 from lxml import etree
+from adapters.clang_uml.parser import CppTypeParser
 from core.uml_model import (
     UmlModel, UmlElement, UmlAssociation, ElementKind, 
     ClangMetadata, XmiId, ElementName
@@ -41,10 +42,7 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
         self.writer = writer
         self.name_to_xmi = name_to_xmi
         self.model = model
-        try:
-            self.elements_by_id = model.elements
-        except Exception:
-            self.elements_by_id = {}
+        self.elements_by_id = model.elements
         self._elements_by_id_str = {str(xid): el for xid, el in self.elements_by_id.items()}
 
     def visit_class(self, info: UmlElement) -> None:
@@ -78,36 +76,27 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
         if inst_of and isinstance(inst_args, list) and inst_args and all(arg is not None for arg in inst_args):
             # Write binding unconditionally when instantiation data is present.
             signature_ref: XmiId = XmiId(stable_id(str(inst_of) + ":templateSignature"))
-            try:
-                self.writer.write_template_binding(stable_id(xmi + ":binding"), signature_ref, inst_args)  # type: ignore[arg-type]
-            except Exception as e:
-                logger.warning(f"Skip templateBinding for '{name}': {e}")
+            self.writer.write_template_binding(stable_id(xmi + ":binding"), signature_ref, inst_args)  # type: ignore[arg-type]
         else:
             # Fallback: if element name looks like an instantiation (contains '<>'), try to bind by parsing name
             nstr = str(name)
             if '<' in nstr and '>' in nstr:
-                try:
-                    base_template, arg_names = CppTypeParser.parse_template_args(nstr)
-                    base_id = self.name_to_xmi.get(ElementName(base_template))
-                    if base_id:
-                        sig_ref: XmiId = XmiId(stable_id(str(base_id) + ":templateSignature"))
-                        arg_ids: List[XmiId] = []
-                        for an in arg_names:
-                            aid = self.name_to_xmi.get(ElementName(an))
-                            if aid:
-                                arg_ids.append(aid)
-                        if arg_ids:
-                            self.writer.write_template_binding(stable_id(xmi + ":binding"), sig_ref, arg_ids)
-                except Exception:
-                    pass
+                base_template, arg_names = CppTypeParser.parse_template_args(nstr)
+                base_id = self.name_to_xmi.get(ElementName(base_template))
+                if base_id:
+                    sig_ref: XmiId = XmiId(stable_id(str(base_id) + ":templateSignature"))
+                    arg_ids: List[XmiId] = []
+                    for an in arg_names:
+                        aid = self.name_to_xmi.get(ElementName(an))
+                        if aid:
+                            arg_ids.append(aid)
+                    if arg_ids:
+                        self.writer.write_template_binding(stable_id(xmi + ":binding"), sig_ref, arg_ids)
 
         generalizations = getattr(self.model, "generalizations", []) or []
         for gen in generalizations:
             if gen.child_id == xmi:
-                try:
-                    parent_exists = gen.parent_id in self.model.elements
-                except Exception:
-                    parent_exists = False
+                parent_exists = gen.parent_id in self.model.elements
                 if not parent_exists:
                     logger.warning(f"Skip generalization for '{name}': parent id {gen.parent_id} not found")
                     continue
@@ -179,10 +168,7 @@ class XmiGenerator:
         self.model = model
         self.name_to_xmi: Dict[ElementName, XmiId] = model.name_to_xmi
         self.graph = graph
-        try:
-            self.elements_by_id: Dict[XmiId, UmlElement] = model.elements
-        except Exception:
-            self.elements_by_id = {}
+        self.elements_by_id: Dict[XmiId, UmlElement] = model.elements
         self._elements_by_id_str = {str(xid): el for xid, el in self.elements_by_id.items()}
 
         self.created: Dict[ElementName, UmlElement] = {
@@ -193,10 +179,7 @@ class XmiGenerator:
         self.xmi_to_name: Dict[XmiId, ElementName] = {xmi: name for name, xmi in self.name_to_xmi.items()}
 
         if self.graph and hasattr(self.graph, "namespaces") and hasattr(self.graph, "elements_by_id"):
-            try:
-                self.namespace_tree = self._build_tree_from_namespace_node(self.graph.namespaces, self.graph.elements_by_id)
-            except Exception:
-                self.namespace_tree = self._build_namespace_tree(self.created)
+            self.namespace_tree = self._build_tree_from_namespace_node(self.graph.namespaces, self.graph.elements_by_id)
         else:
             self.namespace_tree: NamespaceTree = self._build_namespace_tree(self.created)
 
@@ -206,43 +189,34 @@ class XmiGenerator:
         self._cleanup_invalid_associations()
         self._ensure_association_types_materialized()
         if self.graph and hasattr(self.graph, "namespaces") and hasattr(self.graph, "elements_by_id"):
-            try:
-                for name, elem in self.created.items():
-                    if elem.xmi not in self.graph.elements_by_id:
-                        self.graph.elements_by_id[elem.xmi] = elem
-                self.namespace_tree = self._build_tree_from_namespace_node(self.graph.namespaces, self.graph.elements_by_id)
-            except Exception:
-                self.namespace_tree = self._build_namespace_tree(self.created)
+            for name, elem in self.created.items():
+                if elem.xmi not in self.graph.elements_by_id:
+                    self.graph.elements_by_id[elem.xmi] = elem
+            self.namespace_tree = self._build_tree_from_namespace_node(self.graph.namespaces, self.graph.elements_by_id)
         else:
             self.namespace_tree = self._build_namespace_tree(self.created)
         self._validate_model()
 
     def _ensure_association_types_materialized(self) -> None:
-        try:
-            present_ids = {elem.xmi for elem in self.created.values()}
-        except Exception:
-            present_ids = set()
+        present_ids = {elem.xmi for elem in self.created.values()}
         xmi_to_name: Dict[XmiId, ElementName] = {xmi: name for name, xmi in self.name_to_xmi.items()}
         for assoc in list(self.model.associations):
             for end_id in (assoc.src, assoc.tgt):
                 if end_id not in present_ids:
                     name = xmi_to_name.get(end_id) or ElementName(f"Type_{str(end_id)[-8:]}")
-                    try:
-                        stub_element: UmlElement = UmlElement(
-                            xmi=end_id,
-                            name=name,
-                            kind=ElementKind.DATATYPE,
-                            members=[],
-                            clang=ClangMetadata(),
-                            used_types=frozenset(),
-                            underlying=None,
-                            is_stub=True,
-                            original_data={"materialized_stub": True},
-                        )
-                        self.created[name] = stub_element
-                        present_ids.add(end_id)
-                    except Exception:
-                        pass
+                    stub_element: UmlElement = UmlElement(
+                        xmi=end_id,
+                        name=name,
+                        kind=ElementKind.DATATYPE,
+                        members=[],
+                        clang=ClangMetadata(),
+                        used_types=frozenset(),
+                        underlying=None,
+                        is_stub=True,
+                        original_data={"materialized_stub": True},
+                    )
+                    self.created[name] = stub_element
+                    present_ids.add(end_id)
 
     def _build_tree_from_namespace_node(self, node: Any, elements_by_id: Dict[XmiId, UmlElement]) -> NamespaceTree:
         def rec(ns_node: Any) -> Dict[str, Any]:
@@ -270,27 +244,24 @@ class XmiGenerator:
             for namespace_name, namespace_xmi in self.model.namespace_packages.items():
                 tree[namespace_name] = {'__namespace__': True, '__children__': {}, '__xmi_id__': namespace_xmi}
         for q_name, info in elements.items():
-            try:
-                name_str = str(q_name)
-                if '::' not in name_str:
+            name_str = str(q_name)
+            if '::' not in name_str:
+                tree[name_str] = info
+            else:
+                parts = name_str.split('::')
+                if len(parts) == 1:
                     tree[name_str] = info
                 else:
-                    parts = name_str.split('::')
-                    if len(parts) == 1:
-                        tree[name_str] = info
-                    else:
-                        current: Dict[str, Any] = tree
-                        for part in parts[:-1]:
-                            if part not in current:
-                                current[part] = {'__namespace__': True, '__children__': {}}
-                            elif not isinstance(current[part], dict) or '__namespace__' not in current[part]:
-                                existing_element: UmlElement = current[part]  # type: ignore
-                                current[part] = {'__namespace__': True, '__children__': {}}
-                                current[part]['__children__']['__root__'] = existing_element  # type: ignore
-                            current = current[part]['__children__']  # type: ignore
-                        current[parts[-1]] = info
-            except Exception:
-                tree[str(q_name)] = info
+                    current: Dict[str, Any] = tree
+                    for part in parts[:-1]:
+                        if part not in current:
+                            current[part] = {'__namespace__': True, '__children__': {}}
+                        elif not isinstance(current[part], dict) or '__namespace__' not in current[part]:
+                            existing_element: UmlElement = current[part]  # type: ignore
+                            current[part] = {'__namespace__': True, '__children__': {}}
+                            current[part]['__children__']['__root__'] = existing_element  # type: ignore
+                        current = current[part]['__children__']  # type: ignore
+                    current[parts[-1]] = info
         return tree
 
     def _collect_referenced_types(self) -> Set[str]:
@@ -320,21 +291,18 @@ class XmiGenerator:
                 continue
             if type_name in ['int', 'char', 'bool', 'float', 'double', 'void', 'string', 'std::string']:
                 continue
-            try:
-                stub_id: XmiId = XmiId(stable_id(f"stub:{type_name}"))
-                self.name_to_xmi[ElementName(type_name)] = stub_id
-                stub_element: UmlElement = UmlElement(
-                    xmi=stub_id,
-                    name=ElementName(type_name),
-                    kind=ElementKind.DATATYPE,
-                    members=[],
-                    clang=ClangMetadata(),
-                    used_types=frozenset(),
-                    underlying=None
-                )
-                self.created[ElementName(type_name)] = stub_element
-            except Exception as e:
-                logger.error(f"Error creating stub for type {type_name}: {e}")
+            stub_id: XmiId = XmiId(stable_id(f"stub:{type_name}"))
+            self.name_to_xmi[ElementName(type_name)] = stub_id
+            stub_element: UmlElement = UmlElement(
+                xmi=stub_id,
+                name=ElementName(type_name),
+                kind=ElementKind.DATATYPE,
+                members=[],
+                clang=ClangMetadata(),
+                used_types=frozenset(),
+                underlying=None
+            )
+            self.created[ElementName(type_name)] = stub_element
 
     def _resolve_association_targets(self) -> None:
         for assoc in self.model.associations:
@@ -396,29 +364,26 @@ class XmiGenerator:
 
     def _write_package_contents(self, visitor: UmlXmiWritingVisitor, tree: NamespaceTree, parent_name: str = "") -> None:
         for name, item in tree.items():
-            try:
-                if isinstance(item, dict) and item.get('__namespace__'):
-                    package_name: str = f"{parent_name}::{name}" if parent_name else name
-                    if '__xmi_id__' in item:
-                        package_id: str = str(item['__xmi_id__'])
-                    else:
-                        package_id: str = stable_id(f"package:{package_name}")
-                    visitor.writer.start_package(package_id, name)
-                    children: Dict[str, Any] = item.get('__children__', {})  # type: ignore
-                    self._write_package_contents(visitor, children, package_name)
-                    visitor.writer.end_package()
+            if isinstance(item, dict) and item.get('__namespace__'):
+                package_name: str = f"{parent_name}::{name}" if parent_name else name
+                if '__xmi_id__' in item:
+                    package_id: str = str(item['__xmi_id__'])
                 else:
-                    if hasattr(item, 'kind'):
-                        if item.kind == ElementKind.CLASS:
-                            visitor.visit_class(item)
-                        elif item.kind == ElementKind.ENUM:
-                            visitor.visit_enum(item)
-                        elif item.kind == ElementKind.DATATYPE:
-                            visitor.visit_datatype(item)
-                        else:
-                            visitor.visit_class(item)
-            except Exception:
-                pass
+                    package_id: str = stable_id(f"package:{package_name}")
+                visitor.writer.start_package(package_id, name)
+                children: Dict[str, Any] = item.get('__children__', {})  # type: ignore
+                self._write_package_contents(visitor, children, package_name)
+                visitor.writer.end_package()
+            else:
+                if hasattr(item, 'kind'):
+                    if item.kind == ElementKind.CLASS:
+                        visitor.visit_class(item)
+                    elif item.kind == ElementKind.ENUM:
+                        visitor.visit_enum(item)
+                    elif item.kind == ElementKind.DATATYPE:
+                        visitor.visit_datatype(item)
+                    else:
+                        visitor.visit_class(item)
 
     def write(self, out_path: str, project_name: str, pretty: bool = False) -> None:
         namespace_tree: NamespaceTree = self._build_namespace_tree(self.created)
@@ -449,12 +414,9 @@ class XmiGenerator:
                     xf.write(dep_el)
             writer.end_doc()
         if pretty:
-            try:
-                parser = etree.XMLParser(remove_blank_text=True)
-                tree = etree.parse(out_path, parser)
-                tree.write(out_path, encoding="utf-8", xml_declaration=True, pretty_print=True)
-            except Exception as e:
-                logger.warning(f"Pretty-print failed: {e}")
+            parser = etree.XMLParser(remove_blank_text=True)
+            tree = etree.parse(out_path, parser)
+            tree.write(out_path, encoding="utf-8", xml_declaration=True, pretty_print=True)
 
 __all__ = ["XmiGenerator"]
 

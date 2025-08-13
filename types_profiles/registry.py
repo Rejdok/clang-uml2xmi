@@ -75,7 +75,7 @@ def _load_single_profile(path: str) -> Dict[str, Any]:
         if path.lower().endswith(('.yml', '.yaml')):
             try:
                 import yaml  # type: ignore
-            except Exception as e:
+            except ImportError as e:
                 raise RuntimeError(f"YAML profile provided but PyYAML not installed: {path}") from e
             return yaml.safe_load(f) or {}
         return json.load(f)
