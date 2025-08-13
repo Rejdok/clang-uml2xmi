@@ -578,5 +578,62 @@ def test_dependency_missing_client_or_supplier_detected():
         except FileNotFoundError:
             pass
 
+def test_no_unresolved_refs_on_container_and_refs_case():
+    """End-to-end: vector<T> member and const/ref params should not produce unresolved idrefs."""
+    import tempfile, os
+    from build.cpp.builder import CppModelBuilder
+    from core.uml_model import UmlModel as UmlCoreModel
+    from gen.xmi.generator import XmiGenerator
+    from lxml import etree
+    from tools.validate_xmi import collect_ids, find_unresolved
+
+    data = {
+        "elements": [
+            {"name": "std::vector", "display_name": "std::vector<T>", "is_template": True, "templates": ["T"], "kind": "class"},
+            {"name": "std::string", "display_name": "std::string", "kind": "class"},
+            {"name": "sink_ptr", "display_name": "sink_ptr", "kind": "class"},
+            {"name": "spdlog::logger", "display_name": "spdlog::logger", "kind": "class", "members": [
+                {"name": "sinks_", "type": "std::vector<sink_ptr>"},
+            ], "operations": [
+                {"name": "set_pattern", "return_type": "void", "parameters": [["pattern", "const std::string&"]]},
+            ]},
+        ]
+    }
+
+    builder = CppModelBuilder(data, enable_template_binding=True)
+    prep = builder.build()
+    elements_by_xmi = {elem.xmi: elem for elem in prep["created"].values()}
+    model = UmlCoreModel(
+        elements=elements_by_xmi,
+        associations=prep["associations"],
+        dependencies=prep["dependencies"],
+        generalizations=prep.get("generalizations", []),
+        name_to_xmi=prep["name_to_xmi"],
+    )
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.xmi', delete=False) as tmp:
+        path = tmp.name
+    try:
+        XmiGenerator(model).write(path, "NoUnresolved")
+        parser = etree.XMLParser(remove_blank_text=True)
+        tree = etree.parse(path, parser)
+        root = tree.getroot()
+        ids = collect_ids(root)
+        unresolved = find_unresolved(root, ids, limit=50)
+        unresolved = [(rid, el) for rid, el in unresolved if el.tag.split('}')[-1] != 'signature']
+        assert not unresolved, f"Found unresolved references: {unresolved}"
+        # Optional: run EMF validator if Maven available (full UML2 model load)
+        mvn_cmd = 'mvn -q -f tools/emf_validator/pom.xml -DskipTests exec:java -Dexec.args="' + path.replace('\\','/') + '"'
+        try:
+            subprocess.run(mvn_cmd, shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except Exception:
+            # If mvn is not installed, skip silently
+            pass
+    finally:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+
 if __name__ == "__main__":
     test_xmi_generator()

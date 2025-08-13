@@ -37,6 +37,9 @@ class GeneratorConfig:
     strict_validation: bool = False
     pretty_print: bool = False
     types_profiles: Optional[List[str]] = None
+    # Association policy
+    allow_owned_end: bool = True
+    annotate_owned_end: bool = True
 
 
 DEFAULT_CONFIG = GeneratorConfig()

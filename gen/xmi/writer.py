@@ -16,6 +16,8 @@ class XmiWriter:
     def __init__(self, xf: etree.xmlfile, xml_model: Optional[NewXmlModel] = None) -> None:
         self.xf: etree.xmlfile = xf
         self._ctx_stack: ContextStack = []
+        self._referenced_type_ids: set[str] = set()
+        self._emitted_property_ids: set[str] = set()
         
         # Use provided model or default
         if xml_model is None:
@@ -102,7 +104,7 @@ class XmiWriter:
         ctx: etree._Element = self._ctx_stack.pop()
         ctx.__exit__(None, None, None)
 
-    def write_owned_attribute(self, aid: str, name: str, visibility: str = "private", type_ref: Optional[XmiId] = None, is_static: bool = False) -> None:
+    def write_owned_attribute(self, aid: str, name: str, visibility: str = "private", type_ref: Optional[XmiId] = None, is_static: bool = False, association_ref: Optional[XmiId] = None, opposite_ref: Optional[XmiId] = None) -> None:
         """Write owned attribute - XMI 2.1 compliant."""
         # XMI 2.1 compliant attributes
         attrs: ElementAttributes = {
@@ -118,9 +120,18 @@ class XmiWriter:
             attrs["isStatic"] = "true"
         if type_ref:
             attrs["type"] = str(type_ref)
+        if association_ref:
+            attrs["association"] = str(association_ref)
+        if opposite_ref:
+            attrs["opposite"] = str(opposite_ref)
             
         el: etree._Element = etree.Element("ownedAttribute", attrib=attrs, nsmap=self.config.uml_nsmap)
         self.xf.write(el)
+        try:
+            if aid:
+                self._emitted_property_ids.add(str(aid))
+        except Exception:
+            pass
 
     def start_owned_operation(self, oid: str, name: str, visibility: str = "public", is_static: bool = False, is_abstract: bool = False) -> None:
         """Start owned operation - XMI 2.1 compliant."""
@@ -338,65 +349,149 @@ class XmiWriter:
             )
             return bound_el
 
-        # Add association ends with XMI 2.1 compliance
-        # Use source element ID as name for end1
-        end1_el = etree.SubElement(assoc_el, "ownedEnd", attrib={
-            self.config.xmi_id: end1_id,
-            "name": f"end1_{assoc.src}",  # Use source ID as name
-            "visibility": "public",
-            "isOrdered": "false",
-            "isUnique": "true",
-            "isReadOnly": "false",
-            "aggregation": "none",
-            "type": str(assoc.src),
-            "association": aid
-        }, nsmap=self.config.uml_nsmap)
-        
-        # Add multiplicity for end1 - use default if not specified
-        add_bound_value(end1_el, "lowerValue", "1")
-        add_bound_value(end1_el, "upperValue", "1")
+        # For UML2 5.x: Prefer class-owned Property ids when provided.
+        # If not provided, create ownedEnd Properties under the Association and reference them
+        # only when allowed by configuration.
+        from app.config import DEFAULT_CONFIG
+        allow_owned = True
+        try:
+            allow_owned = DEFAULT_CONFIG.allow_owned_end
+        except Exception:
+            pass
+        create_owned_end1: bool = False
+        create_owned_end2: bool = False
+        if not assoc._end1_id:
+            if allow_owned:
+                create_owned_end1 = True
+            end1_id = stable_id(aid + ":end1")
+        if not assoc._end2_id:
+            if allow_owned:
+                create_owned_end2 = True
+            end2_id = stable_id(aid + ":end2")
 
-        # Use target element ID as name for end2
-        end2_el = etree.SubElement(assoc_el, "ownedEnd", attrib={
-            self.config.xmi_id: end2_id,
-            "name": xml_text(assoc.name or f"end2_{assoc.tgt}"),
-            "visibility": "public",
-            "isOrdered": "false",
-            "isUnique": "true",
-            "isReadOnly": "false",
-            "aggregation": (assoc.aggregation.value if hasattr(assoc.aggregation, 'value') else str(assoc.aggregation) if assoc.aggregation else "none"),
-            "type": str(assoc.tgt),
-            "association": aid
-        }, nsmap=self.config.uml_nsmap)
-        
-        # Add multiplicity for end2 - use association multiplicity if specified
-        if assoc.multiplicity:
-            if assoc.multiplicity == "*":
-                add_bound_value(end2_el, "lowerValue", "0")
-                add_bound_value(end2_el, "upperValue", "*")
-            else:
-                add_bound_value(end2_el, "lowerValue", "1")
-                add_bound_value(end2_el, "upperValue", assoc.multiplicity)
-        else:
-            # Default multiplicity
+        if create_owned_end1:
+            # ownedEnd 1 -> type = src
+            end1_el = etree.SubElement(
+                assoc_el,
+                "ownedEnd",
+                attrib={
+                    self.config.xmi_type: "uml:Property",
+                    self.config.xmi_id: end1_id,
+                    "name": f"end1_{assoc.src}",
+                    "visibility": "public",
+                    "isOrdered": "false",
+                    "isUnique": "true",
+                    "isReadOnly": "false",
+                    "aggregation": "none",
+                    "type": str(assoc.src),
+                    "association": aid,
+                },
+                nsmap=self.config.uml_nsmap,
+            )
+            add_bound_value(end1_el, "lowerValue", "1")
+            add_bound_value(end1_el, "upperValue", "1")
+            try:
+                if end1_id:
+                    self._emitted_property_ids.add(str(end1_id))
+            except Exception:
+                pass
+
+        if create_owned_end2:
+            # ownedEnd 2 -> type = tgt
+            end2_el = etree.SubElement(
+                assoc_el,
+                "ownedEnd",
+                attrib={
+                    self.config.xmi_type: "uml:Property",
+                    self.config.xmi_id: end2_id,
+                    "name": f"end2_{assoc.tgt}",
+                    "visibility": "public",
+                    "isOrdered": "false",
+                    "isUnique": "true",
+                    "isReadOnly": "false",
+                    "aggregation": "none",
+                    "type": str(assoc.tgt),
+                    "association": aid,
+                },
+                nsmap=self.config.uml_nsmap,
+            )
             add_bound_value(end2_el, "lowerValue", "1")
             add_bound_value(end2_el, "upperValue", "1")
+            try:
+                if end2_id:
+                    self._emitted_property_ids.add(str(end2_id))
+            except Exception:
+                pass
 
-        # Add memberEnd references to the association (XMI: idref to the ends)
-        # Use the actual ids assigned on the ownedEnd elements to avoid inconsistencies
-        end1_assigned_id = end1_el.get(self.config.xmi_id) or ""
-        end2_assigned_id = end2_el.get(self.config.xmi_id) or ""
-        if not end1_assigned_id or not end2_assigned_id:
-            raise ValueError("Association ownedEnd missing xmi:id; cannot create memberEnd references")
-        etree.SubElement(assoc_el, "memberEnd", attrib={
-            self.config.xmi_idref: end1_assigned_id
-        }, nsmap=self.config.uml_nsmap)
-        etree.SubElement(assoc_el, "memberEnd", attrib={
-            self.config.xmi_idref: end2_assigned_id
-        }, nsmap=self.config.uml_nsmap)
+        # Do not set 'opposite' attributes on ends to avoid conflicts during EMF load
+
+        # If any ownedEnd was created (i.e., конец не у класса), помечаем ассоциацию eAnnotation как стереотип
+        from app.config import DEFAULT_CONFIG
+        cfg_annotate = True
+        try:
+            cfg_annotate = DEFAULT_CONFIG.annotate_owned_end
+        except Exception:
+            pass
+        if cfg_annotate and (create_owned_end1 or create_owned_end2):
+            try:
+                ann = etree.SubElement(
+                    assoc_el,
+                    "eAnnotations",
+                    attrib={
+                        "source": "cpp",
+                    },
+                    nsmap=self.config.uml_nsmap,
+                )
+                etree.SubElement(
+                    ann,
+                    "details",
+                    attrib={
+                        "key": "stereotype",
+                        "value": "OwnedEnd",
+                    },
+                    nsmap=self.config.uml_nsmap,
+                )
+                etree.SubElement(
+                    ann,
+                    "details",
+                    attrib={
+                        "key": "end1",
+                        "value": "owned" if create_owned_end1 else "class",
+                    },
+                    nsmap=self.config.uml_nsmap,
+                )
+                etree.SubElement(
+                    ann,
+                    "details",
+                    attrib={
+                        "key": "end2",
+                        "value": "owned" if create_owned_end2 else "class",
+                    },
+                    nsmap=self.config.uml_nsmap,
+                )
+            except Exception:
+                pass
+
+        # Always declare memberEnd idrefs (either class-owned or the ownedEnd we just created)
+        etree.SubElement(assoc_el, "memberEnd", attrib={self.config.xmi_idref: end1_id}, nsmap=self.config.uml_nsmap)
+        etree.SubElement(assoc_el, "memberEnd", attrib={self.config.xmi_idref: end2_id}, nsmap=self.config.uml_nsmap)
 
         # Write the complete association
         self.xf.write(assoc_el)
+        # Track referenced type ids for post-materialization
+        try:
+            if assoc.src:
+                self._referenced_type_ids.add(str(assoc.src))
+            if assoc.tgt:
+                self._referenced_type_ids.add(str(assoc.tgt))
+        except Exception:
+            pass
+
+    def get_referenced_type_ids(self) -> set[str]:
+        return set(self._referenced_type_ids)
+
+    def get_emitted_property_ids(self) -> set[str]:
+        return set(self._emitted_property_ids)
 
     def write_packaged_element_raw(self, element: etree._Element) -> None:
         """Write raw packaged element - XMI 2.1 compliant."""

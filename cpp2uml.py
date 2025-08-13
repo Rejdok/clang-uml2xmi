@@ -118,6 +118,15 @@ def _parse_cli(argv: list[str], config: GeneratorConfig) -> tuple[str, str, str,
             config.pretty_print = True
             i += 1
             continue
+        # association policy
+        if arg == "--no-owned-end":
+            config.allow_owned_end = False
+            i += 1
+            continue
+        if arg == "--no-owned-end-annotation":
+            config.annotate_owned_end = False
+            i += 1
+            continue
         # skip unknown
         i += 1
     return inp, out_uml, out_notation, config
