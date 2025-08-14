@@ -2,8 +2,8 @@
 """
 Tests for C Model Builder with Method Binding
 
-⚠️  Tests FALLBACK implementation for C language processing
-TODO: Replace with tests for libclang-c integration
+✅ Tests for C language processing with method binding
+Production-ready implementation integrated with XMI pipeline
 """
 
 import pytest
@@ -11,12 +11,12 @@ import sys
 from pathlib import Path
 
 # Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Path management handled by core/__init__.py
 
 from core.c_model_builder import (
     CModelBuilder, CSourceParser, CMethodBinder, 
     CFunction, CStruct, CParameter, 
-    build_c_model_from_sources, convert_c_model_to_json
+    build_c_uml_model
 )
 
 

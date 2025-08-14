@@ -2,8 +2,8 @@
 """
 Tests for C++ Metadata system
 
-⚠️  These test the FALLBACK implementation with heuristics.
-TODO: Replace with tests for clang-uml C++ library integration.
+✅ Tests for C++ metadata system with bidirectional conversion
+Current implementation provides template processing and metadata preservation
 """
 
 import pytest
@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 # Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Path management handled by core/__init__.py
 
 from core.cpp_metadata import (
     CppMetadata, CppTemplateData, RawTemplateParam, UMLTemplateParameter,

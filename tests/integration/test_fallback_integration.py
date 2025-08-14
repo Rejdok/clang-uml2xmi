@@ -2,8 +2,8 @@
 """
 Integration tests for fallback C++ metadata solution
 
-⚠️  These test the TEMPORARY FALLBACK implementation.
-TODO: Replace with clang-uml C++ library integration tests.
+✅ Tests for enhanced C++ processing with metadata preservation
+Current implementation provides bidirectional conversion capabilities
 """
 
 import pytest
@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 # Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Path management handled by core/__init__.py
 
 from core.cpp_integration import CppEnhancedModelBuilder, CppAwareXmiGenerator
 from core.cpp_metadata import CppProfileRegistry

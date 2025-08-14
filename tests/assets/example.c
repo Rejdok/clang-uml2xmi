@@ -81,3 +81,4 @@ void init_graphics() {
 void cleanup_resources() {
     printf("Resources cleaned up\n");
 }
+

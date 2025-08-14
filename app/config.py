@@ -29,27 +29,41 @@ class DiagramConfig:
 
 @dataclass
 class GeneratorConfig:
-    diagram: DiagramConfig = DiagramConfig()
+    # ===== UNIFIED CONFIGURATION SYSTEM =====
+    # Core settings
+    language: str = "cpp"                      # "cpp", "c", "java", "python" 
+    output_directory: str = "output"           # Centralized output directory
     output_uml: str = "output.uml"
-    output_notation: str = "output.notation"
+    output_notation: str = "output.notation" 
     project_name: str = "GeneratedUML"
+    
+    # Processing settings
     enable_template_binding: bool = True
     strict_validation: bool = False
     pretty_print: bool = False
     types_profiles: Optional[List[str]] = None
-    # Association policy
+    
+    # Diagram settings (consolidated from config_diagram.py)
+    diagram: DiagramConfig = DiagramConfig()
+    
+    # Association policy  
     allow_owned_end: bool = True
     annotate_owned_end: bool = True
     # Emission policy for unresolved referenced types
     emit_referenced_type_stubs: bool = False
     
-    # 🚨 FALLBACK C++ PROCESSING OPTIONS
-    # TODO: Remove when migrating to clang-uml C++ library
+    # ===== LANGUAGE-SPECIFIC OPTIONS =====
+    # C++ processing options (fallback system)
     cpp_processing_strategy: str = "fallback"  # "strict", "fallback", "display_name"
     cpp_max_corruption_level: int = 2          # 0=clean only, 3=accept all  
     cpp_preserve_raw_metadata: bool = True     # For bidirectional conversion
     cpp_enable_profiles: bool = True           # Enable C++ type profiles
     cpp_show_fallback_warnings: bool = True   # Show migration warnings
+    
+    # C processing options
+    c_method_binding: bool = True              # Enable function-to-struct binding
+    c_preserve_comments: bool = True           # Preserve C source comments  
+    c_enable_fallback_parsing: bool = True    # Use regex fallback when clang-uml fails
 
 
 DEFAULT_CONFIG = GeneratorConfig()

@@ -14,3 +14,4 @@ int point_distance_squared(const Point* a, const Point* b);
 Point point_create(int x, int y);
 
 #endif // POINT_H
+

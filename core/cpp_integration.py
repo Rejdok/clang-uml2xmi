@@ -313,3 +313,4 @@ def log_migration_warning():
 
 # Auto-log warning on import
 log_migration_warning()
+
