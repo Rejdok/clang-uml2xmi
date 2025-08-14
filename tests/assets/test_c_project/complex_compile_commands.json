@@ -1,0 +1,22 @@
+[
+  {
+    "directory": "C:/Users/lvbnu/workspace-papyrus/uml2papyrus/tests/assets/test_c_project",
+    "command": "gcc -std=c99 -I./include -I../external/lib/include -I/usr/include -I\"C:/Program Files/Include\" -c main.c -o main.o -lm -lpthread -lcurl",
+    "file": "main.c"
+  },
+  {
+    "directory": "C:/Users/lvbnu/workspace-papyrus/uml2papyrus/tests/assets/test_c_project",
+    "command": "gcc -std=c99 -I./include -I../external/lib/include -c utils.c -o utils.o -lm -lpthread",
+    "file": "utils.c"
+  },
+  {
+    "directory": "C:/Users/lvbnu/workspace-papyrus/uml2papyrus/tests/assets/test_c_project/src",
+    "command": "gcc -std=c99 -I../include -I../../external/lib/include -c helper.c -o helper.o -lcurl -L../lib -Wl,-rpath,../lib",
+    "file": "helper.c"
+  },
+  {
+    "directory": "C:/Users/lvbnu/workspace-papyrus/uml2papyrus/tests/assets/test_c_project",
+    "command": "gcc -std=c99 -I./include -c point.c -o point.o -O2 -g -DDEBUG=1 -DVERBOSE=1",
+    "file": "point.c"
+  }
+]

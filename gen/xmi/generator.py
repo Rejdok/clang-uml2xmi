@@ -35,6 +35,12 @@ class XmiElementVisitor:
 
     def visit_datatype(self, info: UmlElement) -> None:
         raise NotImplementedError
+    
+    def visit_package(self, info: UmlElement) -> None:
+        raise NotImplementedError
+    
+    def visit_artifact(self, info: UmlElement) -> None:
+        raise NotImplementedError
 
 
 class UmlXmiWritingVisitor(XmiElementVisitor):
@@ -232,6 +238,72 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
                 self.writer.write_generalization(stable_id(xmi + ":gen"), tref)
         # Template binding emission for datatypes disabled
         self.writer.end_packaged_element()
+    
+    def visit_package(self, info: UmlElement) -> None:
+        """Generate XMI for Package element (build target)"""
+        name: ElementName = info.name
+        xmi: XmiId = info.xmi
+        short_name = str(name).split('::')[-1] if '::' in str(name) else str(name)
+        uml_model = NEW_DEFAULT_META.uml
+        
+        # Start package element
+        self.writer.start_packaged_element(xmi, uml_model.package_type, short_name)
+        
+        # Add stereotype application for build target
+        if hasattr(info, 'original_data') and info.original_data:
+            build_data = info.original_data
+            stereotype = build_data.get('stereotype', 'target')
+            self._write_build_stereotype_application(xmi, stereotype, build_data)
+        
+        self.writer.end_packaged_element()
+    
+    def visit_artifact(self, info: UmlElement) -> None:
+        """Generate XMI for Artifact element (source file)"""
+        name: ElementName = info.name
+        xmi: XmiId = info.xmi
+        short_name = str(name).split('::')[-1] if '::' in str(name) else str(name)
+        uml_model = NEW_DEFAULT_META.uml
+        
+        # Start artifact element
+        self.writer.start_packaged_element(xmi, uml_model.artifact_type, short_name)
+        
+        # Add stereotype application for file
+        if hasattr(info, 'original_data') and info.original_data:
+            file_data = info.original_data
+            self._write_file_stereotype_application(xmi, file_data)
+        
+        self.writer.end_packaged_element()
+    
+    def _write_build_stereotype_application(self, element_id: XmiId, stereotype: str, build_data: Dict[str, Any]) -> None:
+        """Write stereotype application for build target"""
+        from utils.ids import stable_id
+        
+        # Create stereotype application
+        stereotype_id = stable_id(f"stereotype:{element_id}:{stereotype}")
+        
+        # Write tagged values as comments for now (full stereotype support would require profile)
+        if 'output_file' in build_data:
+            self.writer.write_comment(f"Output: {build_data['output_file']}")
+        if 'compile_flags' in build_data and build_data['compile_flags']:
+            flags = ' '.join(build_data['compile_flags']) if isinstance(build_data['compile_flags'], list) else build_data['compile_flags']
+            self.writer.write_comment(f"Compile flags: {flags}")
+        if 'link_flags' in build_data and build_data['link_flags']:
+            flags = ' '.join(build_data['link_flags']) if isinstance(build_data['link_flags'], list) else build_data['link_flags']
+            self.writer.write_comment(f"Link flags: {flags}")
+        if 'build_order' in build_data:
+            self.writer.write_comment(f"Build order: {build_data['build_order']}")
+    
+    def _write_file_stereotype_application(self, element_id: XmiId, file_data: Dict[str, Any]) -> None:
+        """Write stereotype application for file artifact"""
+        
+        # Write tagged values as comments for now
+        if 'file_path' in file_data:
+            self.writer.write_comment(f"File path: {file_data['file_path']}")
+        if 'object_file' in file_data:
+            self.writer.write_comment(f"Object file: {file_data['object_file']}")
+        if 'compile_flags' in file_data and file_data['compile_flags']:
+            flags = ' '.join(file_data['compile_flags']) if isinstance(file_data['compile_flags'], list) else file_data['compile_flags']
+            self.writer.write_comment(f"Compile flags: {flags}")
 
 
 class XmiGenerator:
@@ -612,6 +684,10 @@ class XmiGenerator:
                         visitor.visit_enum(item)
                     elif item.kind == ElementKind.DATATYPE:
                         visitor.visit_datatype(item)
+                    elif item.kind == ElementKind.PACKAGE:
+                        visitor.visit_package(item)
+                    elif item.kind == ElementKind.ARTIFACT:
+                        visitor.visit_artifact(item)
                     else:
                         visitor.visit_class(item)
 

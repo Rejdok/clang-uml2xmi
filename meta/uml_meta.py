@@ -11,6 +11,7 @@ class UmlMetaModel:
     datatype_type: ElementType = "uml:DataType"
     association_type: ElementType = "uml:Association"
     package_type: ElementType = "uml:Package"
+    artifact_type: ElementType = "uml:Artifact"
     dependency_type: ElementType = "uml:Dependency"
     generalization_type: ElementType = "uml:Generalization"
 
@@ -43,6 +44,8 @@ class UmlMetaModel:
             "template": self.class_type,
             "struct": self.class_type,
             "union": self.class_type,
+            "package": self.package_type,
+            "artifact": self.artifact_type,
         }
         return mapping.get(kind, self.class_type)
 

@@ -566,6 +566,11 @@ class XmiWriter:
     def write_packaged_element_raw(self, element: etree._Element) -> None:
         """Write raw packaged element - XMI 2.1 compliant."""
         self.xf.write(element)
+    
+    def write_comment(self, text: str) -> None:
+        """Write XML comment (for file writers, we'll skip this)."""
+        # Skip comments for file writers as they don't support append
+        pass
 
 __all__ = ["XmiWriter"]
 
