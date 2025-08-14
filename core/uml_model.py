@@ -1,5 +1,8 @@
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Tuple, Union, Any
+from typing import List, Optional, Dict, Tuple, Union, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from uml_types.uml import InheritanceType
 from uml_types import (
     XmiId, ElementName, TypeName, Multiplicity, 
     ElementKind, Visibility, AggregationType,
@@ -115,7 +118,7 @@ class UmlGeneralization:
     """Represents inheritance relationship between UML elements."""
     child_id: XmiId  # Child element XMI ID
     parent_id: XmiId  # Parent element XMI ID
-    inheritance_type: 'InheritanceType' = None  # Type of inheritance (public/private/protected)
+    inheritance_type: Optional['InheritanceType'] = None  # Type of inheritance (public/private/protected)
     is_virtual: bool = False  # Virtual inheritance
     is_final: bool = False  # Final class (cannot be inherited)
     _gen_id: Optional[XmiId] = None  # Generalization element XMI ID
