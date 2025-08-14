@@ -17,6 +17,8 @@ class XmiWriter:
         self.xf: etree.xmlfile = xf
         self._ctx_stack: ContextStack = []
         self._referenced_type_ids: set[str] = set()
+        self._referenced_idrefs: set[str] = set()
+        self._emitted_ids: set[str] = set()
         self._emitted_property_ids: set[str] = set()
         
         # Use provided model or default
@@ -38,12 +40,12 @@ class XmiWriter:
         self._ctx_stack.append(xmi_ctx)
 
         # UML Model element - XMI 2.1 compliant
+        # Root model should not have visibility (EMF requirement)
         model_ctx: etree._Element = self.xf.element(
             f"{{{self.config.uml_ns}}}Model",
             **{
                 self.config.xmi_id: model_id,
-                "name": model_name,
-                "visibility": "public"
+                "name": model_name
             }
         )
         model_ctx.__enter__()
@@ -82,6 +84,10 @@ class XmiWriter:
         ctx: etree._Element = self.xf.element("packagedElement", nsmap=self.config.uml_nsmap, **attrs)
         ctx.__enter__()
         self._ctx_stack.append(ctx)
+        try:
+            self._emitted_ids.add(str(xmi_id))
+        except Exception:
+            pass
 
     def end_packaged_element(self) -> None:
         """End packaged element."""
@@ -98,6 +104,10 @@ class XmiWriter:
         })
         ctx.__enter__()
         self._ctx_stack.append(ctx)
+        try:
+            self._emitted_ids.add(str(package_id))
+        except Exception:
+            pass
 
     def end_package(self) -> None:
         """End a package element."""
@@ -120,10 +130,23 @@ class XmiWriter:
             attrs["isStatic"] = "true"
         if type_ref:
             attrs["type"] = str(type_ref)
+            try:
+                self._referenced_type_ids.add(str(type_ref))
+                self._referenced_idrefs.add(str(type_ref))
+            except Exception:
+                pass
         if association_ref:
             attrs["association"] = str(association_ref)
+            try:
+                self._referenced_idrefs.add(str(association_ref))
+            except Exception:
+                pass
         if opposite_ref:
             attrs["opposite"] = str(opposite_ref)
+            try:
+                self._referenced_idrefs.add(str(opposite_ref))
+            except Exception:
+                pass
             
         el: etree._Element = etree.Element("ownedAttribute", attrib=attrs, nsmap=self.config.uml_nsmap)
         self.xf.write(el)
@@ -153,6 +176,10 @@ class XmiWriter:
         ctx: etree._Element = self.xf.element("ownedOperation", nsmap=self.config.uml_nsmap, **attrs)
         ctx.__enter__()
         self._ctx_stack.append(ctx)
+        try:
+            self._emitted_ids.add(str(oid))
+        except Exception:
+            pass
 
     def end_owned_operation(self) -> None:
         """End owned operation."""
@@ -183,6 +210,10 @@ class XmiWriter:
             
         el: etree._Element = etree.Element("ownedParameter", nsmap=self.config.uml_nsmap, **attrs)
         self.xf.write(el)
+        try:
+            self._emitted_ids.add(str(pid))
+        except Exception:
+            pass
 
     def write_literal(self, lid: str, name: str) -> None:
         """Write literal - XMI 2.1 compliant."""
@@ -250,8 +281,10 @@ class XmiWriter:
         )
         self.xf.write(el)
 
-    def write_template_binding(self, binding_id: str, signature_ref: XmiId, arg_ids: List[XmiId]) -> None:
-        """Write templateBinding with parameterSubstitution entries as a child of current element."""
+    def write_template_binding(self, binding_id: str, signature_ref: Optional[XmiId], arg_ids: List[XmiId]) -> None:
+        """Write templateBinding with parameterSubstitution entries as a child of current element.
+        If signature_ref is None, omit the 'signature' child (permissive mode).
+        """
         # Nest within current open packagedElement using xmlfile contexts
         with self.xf.element(
             "templateBinding",
@@ -261,13 +294,14 @@ class XmiWriter:
                 self.config.xmi_type: "uml:TemplateBinding",
             },
         ):
-            # signature reference
-            with self.xf.element(
-                "signature",
-                nsmap=self.config.uml_nsmap,
-                **{self.config.xmi_idref: str(signature_ref)},
-            ):
-                pass
+            # signature reference (optional)
+            if signature_ref is not None:
+                with self.xf.element(
+                    "signature",
+                    nsmap=self.config.uml_nsmap,
+                    **{self.config.xmi_idref: str(signature_ref)},
+                ):
+                    pass
 
             # substitutions
             for i, aid in enumerate(arg_ids):
@@ -302,6 +336,11 @@ class XmiWriter:
             
         el: etree._Element = etree.Element("generalization", attrib=attrs, nsmap=self.config.uml_nsmap)
         self.xf.write(el)
+        try:
+            self._referenced_idrefs.add(str(general_ref))
+            self._emitted_ids.add(str(gid))
+        except Exception:
+            pass
 
     def write_association(self, assoc: UmlAssociation, uml_model: Optional[NewUmlModel] = None) -> None:
         """Write association - XMI 2.1 compliant."""
@@ -323,6 +362,10 @@ class XmiWriter:
             },
             nsmap=self.config.uml_nsmap
         )
+        try:
+            self._emitted_ids.add(aid)
+        except Exception:
+            pass
 
         # Compute end ids (use precomputed if available)
         end1_id: str = assoc._end1_id or stable_id(aid + ":end1")
@@ -368,6 +411,14 @@ class XmiWriter:
             if allow_owned:
                 create_owned_end2 = True
             end2_id = stable_id(aid + ":end2")
+            
+        # For self-referential associations (same end IDs), always create ownedEnd to avoid duplicate memberEnd
+        if end1_id == end2_id:
+            create_owned_end1 = True
+            create_owned_end2 = True
+            # Generate unique IDs for the ownedEnd properties
+            end1_id = stable_id(aid + ":ownedEnd1")
+            end2_id = stable_id(aid + ":ownedEnd2")
 
         if create_owned_end1:
             # ownedEnd 1 -> type = src
@@ -393,6 +444,7 @@ class XmiWriter:
             try:
                 if end1_id:
                     self._emitted_property_ids.add(str(end1_id))
+                    self._emitted_ids.add(str(end1_id))
             except Exception:
                 pass
 
@@ -420,6 +472,7 @@ class XmiWriter:
             try:
                 if end2_id:
                     self._emitted_property_ids.add(str(end2_id))
+                    self._emitted_ids.add(str(end2_id))
             except Exception:
                 pass
 
@@ -473,8 +526,19 @@ class XmiWriter:
                 pass
 
         # Always declare memberEnd idrefs (either class-owned or the ownedEnd we just created)
-        etree.SubElement(assoc_el, "memberEnd", attrib={self.config.xmi_idref: end1_id}, nsmap=self.config.uml_nsmap)
-        etree.SubElement(assoc_el, "memberEnd", attrib={self.config.xmi_idref: end2_id}, nsmap=self.config.uml_nsmap)
+        # EMF requires exactly 2 memberEnd for valid association
+        # Ensure both end IDs are valid before creating memberEnd
+        if end1_id and end2_id:
+            etree.SubElement(assoc_el, "memberEnd", attrib={self.config.xmi_idref: end1_id}, nsmap=self.config.uml_nsmap)
+            etree.SubElement(assoc_el, "memberEnd", attrib={self.config.xmi_idref: end2_id}, nsmap=self.config.uml_nsmap)
+        else:
+            logger.warning(f"Skipping association {aid} due to invalid end IDs: end1={end1_id}, end2={end2_id}")
+            return  # Don't create invalid association
+        try:
+            self._referenced_idrefs.add(str(end1_id))
+            self._referenced_idrefs.add(str(end2_id))
+        except Exception:
+            pass
 
         # Write the complete association
         self.xf.write(assoc_el)
@@ -490,8 +554,14 @@ class XmiWriter:
     def get_referenced_type_ids(self) -> set[str]:
         return set(self._referenced_type_ids)
 
+    def get_referenced_idrefs(self) -> set[str]:
+        return set(self._referenced_idrefs)
+
     def get_emitted_property_ids(self) -> set[str]:
         return set(self._emitted_property_ids)
+
+    def get_emitted_ids(self) -> set[str]:
+        return set(self._emitted_ids)
 
     def write_packaged_element_raw(self, element: etree._Element) -> None:
         """Write raw packaged element - XMI 2.1 compliant."""

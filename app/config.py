@@ -40,6 +40,8 @@ class GeneratorConfig:
     # Association policy
     allow_owned_end: bool = True
     annotate_owned_end: bool = True
+    # Emission policy for unresolved referenced types
+    emit_referenced_type_stubs: bool = False
 
 
 DEFAULT_CONFIG = GeneratorConfig()

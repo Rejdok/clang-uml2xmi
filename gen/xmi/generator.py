@@ -68,6 +68,34 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
         except Exception:
             return f"{op.name}()"
 
+    def _parse_template_instantiation(self, qualified_name: str) -> Optional[tuple[str, list[str]]]:
+        if '<' not in qualified_name or '>' not in qualified_name:
+            return None
+        base = qualified_name.split('<', 1)[0]
+        args_str = qualified_name[qualified_name.find('<') + 1: qualified_name.rfind('>')]
+        # split by top-level commas
+        args: list[str] = []
+        buf: list[str] = []
+        depth = 0
+        for ch in args_str:
+            if ch == '<':
+                depth += 1
+                buf.append(ch)
+            elif ch == '>':
+                depth -= 1
+                buf.append(ch)
+            elif ch == ',' and depth == 0:
+                arg = ''.join(buf).strip()
+                if arg:
+                    args.append(arg)
+                buf = []
+            else:
+                buf.append(ch)
+        last = ''.join(buf).strip()
+        if last:
+            args.append(last)
+        return base, args
+
     def visit_class(self, info: UmlElement) -> None:
         name: ElementName = info.name
         xmi: XmiId = info.xmi
@@ -82,9 +110,12 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
         uml_model = NEW_DEFAULT_META.uml
         self.writer.start_packaged_element(xmi, uml_model.class_type, short_name, is_abstract=is_abstract, extra_attrs=extra_attrs)
 
-        # Template signature emission temporarily disabled for validator stability
-
-        # Template binding emission temporarily disabled
+        # DISABLED: Template signatures for EMF compatibility
+        # EMF validator requires each template signature to have at least 1 parameter
+        # Many C++ templates have complex/external parameters that can't be properly modeled
+        # For now, disable template signatures to ensure valid EMF XMI output
+        if False:  # Completely disable template signature generation
+            pass
 
         generalizations = getattr(self.model, "generalizations", []) or []
         for gen in generalizations:
@@ -106,19 +137,20 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
             tref: Optional[XmiId] = self.name_to_xmi.get(ElementName(m.type_repr)) if m.type_repr else None
             enr = self.property_enrichments.get(aid, {})
             assoc_ref = enr.get('association')
-            # Do not set opposite on class-owned attributes to avoid conflicts across multiple associations
+            opp_ref = enr.get('opposite')
             self.writer.write_owned_attribute(
                 aid, m.name, visibility=m.visibility.value,
                 type_ref=tref, is_static=m.is_static,
                 association_ref=XmiId(assoc_ref) if assoc_ref else None,
-                opposite_ref=None,
+                opposite_ref=XmiId(opp_ref) if opp_ref else None,
             )
 
         # Emit operations with mangled names to make them distinguishable and ids stable
         seen_param_names: set[str] = set()
         for idx, op in enumerate(info.operations):
             mangled = self._mangle_operation_signature(xmi, op)
-            op_id: str = stable_id(xmi + ":op:" + mangled)
+            # Add index to ensure unique ID even for operations with identical signatures  
+            op_id: str = stable_id(xmi + ":op:" + str(idx) + ":" + mangled)
             # Ensure distinguishable names even when parameter types are missing
             display_name = f"{mangled}#{op_id[-6:]}"
             return_type_ref: Optional[XmiId] = self.name_to_xmi.get(ElementName(op.return_type)) if op.return_type else None
@@ -143,6 +175,22 @@ class UmlXmiWritingVisitor(XmiElementVisitor):
                 param_type_ref: Optional[XmiId] = self.name_to_xmi.get(ElementName(param_type)) if param_type else None
                 self.writer.write_owned_parameter(param_id, param_name, "in", param_type_ref)
             self.writer.end_owned_operation()
+
+        # Emit template binding if this is an instantiation (by metadata or by name heuristic)
+        inst_of = getattr(info, 'instantiation_of', None)
+        inst_args = getattr(info, 'instantiation_args', []) or []
+        if not inst_of and '<' in str(info.name) and '>' in str(info.name):
+            parsed = self._parse_template_instantiation(str(info.name))
+            if parsed:
+                base_name, arg_names = parsed
+                base_id = self.name_to_xmi.get(ElementName(base_name))
+                if base_id:
+                    inst_of = base_id
+                    inst_args = [self.name_to_xmi.get(ElementName(a)) for a in arg_names]
+        # Skip template binding generation for EMF compatibility 
+        # Template bindings with invalid signature references cause EMF validation errors
+        if False:  # Disabled for EMF compatibility
+            pass
 
         self.writer.end_packaged_element()
 
@@ -327,28 +375,79 @@ class XmiGenerator:
                         all_referenced_type_names.add(n)
         return all_referenced_type_names
 
+    def _final_materialize_any_missing_idrefs(self, out_path: str, writer: XmiWriter) -> None:
+        try:
+            parser = etree.XMLParser(remove_blank_text=True)
+            tree = etree.parse(out_path, parser)
+            root = tree.getroot()
+            xmi_ns = NEW_DEFAULT_META.xml.xmi_ns
+            ns = {"xmi": xmi_ns, "uml": NEW_DEFAULT_META.xml.uml_ns}
+            ids_present: set[str] = set(el.get(NEW_DEFAULT_META.xml.xmi_id) for el in root.xpath('//*[@xmi:id]', namespaces=ns))
+            referenced: set[str] = set()
+            # Collect common reference attributes
+            ref_attrs = ["type", "general", "client", "supplier", "association", "opposite"]
+            for attr in ref_attrs:
+                for el in root.xpath(f'//*[@{attr}]', namespaces=ns):
+                    val = el.get(attr)
+                    if val:
+                        referenced.add(val)
+            # xmi:idref occurrences (memberEnd, signature, etc.)
+            for el in root.xpath('//*[@xmi:idref]', namespaces=ns):
+                val = el.get(f'{{{xmi_ns}}}idref')
+                if val:
+                    referenced.add(val)
+            missing = [mid for mid in referenced if mid and mid not in ids_present]
+        except Exception:
+            missing = []
+        if not missing:
+            return
+        # Emit missing as DataType stubs under a dedicated package
+        ext_pkg_id = stable_id("package:ExternalTypes")
+        writer.start_package(ext_pkg_id, "ExternalTypes")
+        for mid in sorted(set(missing)):
+            try:
+                name = self.xmi_to_name.get(XmiId(mid)) if hasattr(self, 'xmi_to_name') else None
+            except Exception:
+                name = None
+            nm_s = str(name) if name else f"Type_{mid[-8:]}"
+            writer.start_packaged_element(XmiId(mid), NEW_DEFAULT_META.uml.datatype_type, nm_s)
+            writer.end_packaged_element()
+        writer.end_package()
+
     def _create_stub_elements(self) -> None:
+        from app.config import DEFAULT_CONFIG
+        emit_stubs = True
+        try:
+            emit_stubs = DEFAULT_CONFIG.emit_referenced_type_stubs
+        except Exception:
+            emit_stubs = True
         logger.info(f"Creating stub elements for {len(self.all_referenced_type_names)} referenced types")
         for type_name in self.all_referenced_type_names:
             if type_name in self.created or ElementName(type_name) in self.name_to_xmi:
                 continue
             if type_name in ['int', 'char', 'bool', 'float', 'double', 'void', 'string', 'std::string']:
                 continue
-            # Skip malformed identifiers (avoid creating elements like "typename ..." or with spaces)
-            if ' ' in type_name or type_name.startswith('typename') or '...' in type_name:
-                continue
-            stub_id: XmiId = XmiId(stable_id(f"stub:{type_name}"))
-            self.name_to_xmi[ElementName(type_name)] = stub_id
-            stub_element: UmlElement = UmlElement(
-                xmi=stub_id,
-                name=ElementName(type_name),
-                kind=ElementKind.DATATYPE,
-                members=[],
-                clang=ClangMetadata(),
-                used_types=frozenset(),
-                underlying=None
-            )
-            self.created[ElementName(type_name)] = stub_element
+            # Generate a stable stub id strictly from the type name
+            if emit_stubs:
+                stub_id: XmiId = XmiId(stable_id(f"type:{type_name}"))
+                self.name_to_xmi[ElementName(type_name)] = stub_id
+                stub_element: UmlElement = UmlElement(
+                    xmi=stub_id,
+                    name=ElementName(type_name),
+                    kind=ElementKind.DATATYPE,
+                    members=[],
+                    clang=ClangMetadata(),
+                    used_types=frozenset(),
+                    underlying=None
+                )
+                self.created[ElementName(type_name)] = stub_element
+                # Ensure the stub is also visible via elements_by_id/model.elements
+                try:
+                    self.elements_by_id[stub_id] = stub_element
+                    self.model.elements[stub_id] = stub_element
+                    self._elements_by_id_str[str(stub_id)] = stub_element
+                except Exception:
+                    pass
 
         # Also materialize template instantiations referenced in member types
         def ensure_instantiation_from_expr(expr: Dict[str, Any]) -> Optional[XmiId]:
@@ -425,9 +524,37 @@ class XmiGenerator:
     def _cleanup_invalid_associations(self) -> None:
         valid_associations: List[UmlAssociation] = []
         valid_xmi_ids = {element.xmi for element in self.created.values()}
+        seen_associations: set[tuple[str, str]] = set()  # Track end pairs to prevent duplicates
+        
         for assoc in self.model.associations:
-            if assoc.src in valid_xmi_ids and assoc.tgt in valid_xmi_ids:
-                valid_associations.append(assoc)
+            # Skip invalid associations
+            if assoc.src not in valid_xmi_ids or assoc.tgt not in valid_xmi_ids:
+                continue
+                
+            # Skip problematic associations
+            # 1. Self-referential associations where both ends are the same property
+            if (assoc.src == assoc.tgt and 
+                assoc._end1_id and assoc._end2_id and 
+                assoc._end1_id == assoc._end2_id):
+                logger.debug(f"Skipping self-referential association: {assoc.name}")
+                continue
+            # 2. Skip associations where either end ID is None/empty (would create invalid memberEnd)
+            if not assoc._end1_id or not assoc._end2_id:
+                logger.debug(f"Skipping association with missing end IDs: {assoc.name} (end1={assoc._end1_id}, end2={assoc._end2_id})")
+                continue
+                
+            # Skip duplicate associations between same endpoints
+            end1 = str(assoc._end1_id) if assoc._end1_id else str(assoc.src)
+            end2 = str(assoc._end2_id) if assoc._end2_id else str(assoc.tgt)
+            end_pair = tuple(sorted([end1, end2]))  # Sort to catch both directions
+            
+            if end_pair in seen_associations:
+                logger.debug(f"Skipping duplicate association: {assoc.name}")
+                continue  # Skip duplicate
+                
+            seen_associations.add(end_pair)
+            valid_associations.append(assoc)
+            
         self.model.associations = valid_associations
 
     def _validate_model(self) -> None:
@@ -535,18 +662,16 @@ class XmiGenerator:
                     assoc.name = f"{left}->{right}"
                 except Exception:
                     pass
-                # Обогащения свойств: association/opposite
+                # Обогащения свойств: association only (skip opposite for EMF compatibility)
                 try:
                     if assoc._end1_id:
                         d = property_enrichments.setdefault(str(assoc._end1_id), {})
                         d.setdefault('association', str(assoc._assoc_id))
-                        if assoc._end2_id:
-                            d.setdefault('opposite', str(assoc._end2_id))
+                        # Skip opposite references for EMF compatibility
                     if assoc._end2_id:
                         d2 = property_enrichments.setdefault(str(assoc._end2_id), {})
                         d2.setdefault('association', str(assoc._assoc_id))
-                        if assoc._end1_id:
-                            d2.setdefault('opposite', str(assoc._end1_id))
+                        # Skip opposite references for EMF compatibility  
                 except Exception:
                     pass
                 # Не мутируем имя ассоциации; оставляем как есть из модели
@@ -561,30 +686,36 @@ class XmiGenerator:
                 emitted_props = visitor.writer.get_emitted_property_ids()  # type: ignore[attr-defined]
             except Exception:
                 emitted_props = set()
-            # Materialize any type ids referenced by elements written so far that are not yet present
+            # Optional: materialize referenced type ids (disabled if policy forbids)
+            from app.config import DEFAULT_CONFIG
+            do_emit_types = True
             try:
-                parser_pk = etree.XMLParser(remove_blank_text=True)
-                tree_pk = etree.parse(out_path, parser_pk)
-                root_pk = tree_pk.getroot()
-                ns_pk = {"xmi": NEW_DEFAULT_META.xml.xmi_ns, "uml": NEW_DEFAULT_META.xml.uml_ns}
-                present_ids = set(el.get(NEW_DEFAULT_META.xml.xmi_id) for el in root_pk.xpath('//*[@xmi:id]', namespaces=ns_pk))
+                do_emit_types = DEFAULT_CONFIG.emit_referenced_type_stubs
             except Exception:
-                present_ids = set()
-            try:
-                referenced_type_ids = visitor.writer.get_referenced_type_ids()  # type: ignore[attr-defined]
-            except Exception:
-                referenced_type_ids = set()
-            missing_type_ids = [tid for tid in referenced_type_ids if tid and tid not in present_ids]
-            if missing_type_ids:
-                ext_pkg_id = stable_id("package:ExternalTypes")
-                writer.start_package(ext_pkg_id, "ExternalTypes")
-                for mid in missing_type_ids:
-                    nm = self.xmi_to_name.get(XmiId(mid)) if hasattr(self, 'xmi_to_name') else None
-                    nm_s = str(nm) if nm else f"Type_{mid[-8:]}"
-                    writer.start_packaged_element(XmiId(mid), NEW_DEFAULT_META.uml.datatype_type, nm_s)
-                    writer.end_packaged_element()
-                    present_ids.add(mid)
-                writer.end_package()
+                do_emit_types = True
+            if do_emit_types:
+                try:
+                    parser_pk = etree.XMLParser(remove_blank_text=True)
+                    tree_pk = etree.parse(out_path, parser_pk)
+                    root_pk = tree_pk.getroot()
+                    ns_pk = {"xmi": NEW_DEFAULT_META.xml.xmi_ns, "uml": NEW_DEFAULT_META.xml.uml_ns}
+                    present_ids = set(el.get(NEW_DEFAULT_META.xml.xmi_id) for el in root_pk.xpath('//*[@xmi:id]', namespaces=ns_pk))
+                except Exception:
+                    present_ids = set()
+                try:
+                    referenced_type_ids = visitor.writer.get_referenced_type_ids()  # type: ignore[attr-defined]
+                except Exception:
+                    referenced_type_ids = set()
+                missing_type_ids = [tid for tid in referenced_type_ids if tid and tid not in present_ids]
+                if missing_type_ids:
+                    ext_pkg_id = stable_id("package:ExternalTypes")
+                    writer.start_package(ext_pkg_id, "ExternalTypes")
+                    for mid in missing_type_ids:
+                        nm = self.xmi_to_name.get(XmiId(mid)) if hasattr(self, 'xmi_to_name') else None
+                        nm_s = str(nm) if nm else f"Type_{mid[-8:]}"
+                        writer.start_packaged_element(XmiId(mid), NEW_DEFAULT_META.uml.datatype_type, nm_s)
+                        writer.end_packaged_element()
+                    writer.end_package()
             for assoc in self.model.associations:
                 # Association id and end property ids already precomputed; just write association
                 logger.debug(f"Writing association: name='{assoc.name}', src='{assoc.src}', tgt='{assoc.tgt}'")
@@ -624,27 +755,58 @@ class XmiGenerator:
                     }
                     dep_el: etree._Element = etree.Element("packagedElement", attrib=attribs, nsmap=xml_model.uml_nsmap)
                     xf.write(dep_el)
-            # Final post-pass: ensure any id referenced by @type exists as xmi:id (emit once under ExternalTypes)
+            # Final post-pass (optional): ensure any id in @type exists
+            do_emit_types_final = True
             try:
-                parser3 = etree.XMLParser(remove_blank_text=True)
-                tree3 = etree.parse(out_path, parser3)
-                root3 = tree3.getroot()
-                ns3 = {"xmi": NEW_DEFAULT_META.xml.xmi_ns, "uml": NEW_DEFAULT_META.xml.uml_ns}
-                ids_in_doc3 = set(el.get(NEW_DEFAULT_META.xml.xmi_id) for el in root3.xpath('//*[@xmi:id]', namespaces=ns3))
-                type_targets3 = set(el.get('type') for el in root3.xpath('//*[@type]', namespaces=ns3))
-                missing_final = [t for t in type_targets3 if t and t not in ids_in_doc3]
+                do_emit_types_final = DEFAULT_CONFIG.emit_referenced_type_stubs
             except Exception:
-                missing_final = []
-            if missing_final:
-                logger.warning(f"Final materialization of {len(missing_final)} missing type ids before closing document")
-                ext_pkg_id4 = stable_id("package:ExternalTypes")
-                writer.start_package(ext_pkg_id4, "ExternalTypes")
-                for mid in missing_final:
-                    nm = self.xmi_to_name.get(XmiId(mid)) if hasattr(self, 'xmi_to_name') else None
-                    nm_s = str(nm) if nm else f"Type_{mid[-8:]}"
-                    writer.start_packaged_element(XmiId(mid), NEW_DEFAULT_META.uml.datatype_type, nm_s)
-                    writer.end_packaged_element()
-                writer.end_package()
+                do_emit_types_final = True
+            if do_emit_types_final:
+                try:
+                    parser3 = etree.XMLParser(remove_blank_text=True)
+                    tree3 = etree.parse(out_path, parser3)
+                    root3 = tree3.getroot()
+                    ns3 = {"xmi": NEW_DEFAULT_META.xml.xmi_ns, "uml": NEW_DEFAULT_META.xml.uml_ns}
+                    ids_in_doc3 = set(el.get(NEW_DEFAULT_META.xml.xmi_id) for el in root3.xpath('//*[@xmi:id]', namespaces=ns3))
+                    type_targets3 = set(el.get('type') for el in root3.xpath('//*[@type]', namespaces=ns3))
+                    missing_final = [t for t in type_targets3 if t and t not in ids_in_doc3]
+                except Exception:
+                    missing_final = []
+                if missing_final:
+                    ext_pkg_id4 = stable_id("package:ExternalTypes")
+                    writer.start_package(ext_pkg_id4, "ExternalTypes")
+                    for mid in missing_final:
+                        nm = self.xmi_to_name.get(XmiId(mid)) if hasattr(self, 'xmi_to_name') else None
+                        nm_s = str(nm) if nm else f"Type_{mid[-8:]}"
+                        writer.start_packaged_element(XmiId(mid), NEW_DEFAULT_META.uml.datatype_type, nm_s)
+                        writer.end_packaged_element()
+                    writer.end_package()
+            # Final catch-all: any id referenced anywhere but not declared gets materialized as DataType
+            from app.config import DEFAULT_CONFIG
+            do_final_emit = True
+            try:
+                do_final_emit = DEFAULT_CONFIG.emit_referenced_type_stubs
+            except Exception:
+                do_final_emit = True
+            if do_final_emit:
+                try:
+                    # Prefer writer-collected idrefs for accuracy
+                    emitted_ids = visitor.writer.get_emitted_ids()  # type: ignore[attr-defined]
+                    idrefs = visitor.writer.get_referenced_idrefs()  # type: ignore[attr-defined]
+                    missing_ids = [rid for rid in idrefs if rid not in emitted_ids]
+                    if missing_ids:
+                        ext_pkg_id = stable_id("package:ExternalTypes")
+                        writer.start_package(ext_pkg_id, "ExternalTypes")
+                        for mid in sorted(set(missing_ids)):
+                            nm = self.xmi_to_name.get(XmiId(mid)) if hasattr(self, 'xmi_to_name') else None
+                            nm_s = str(nm) if nm else f"Type_{mid[-8:]}"
+                            writer.start_packaged_element(XmiId(mid), NEW_DEFAULT_META.uml.datatype_type, nm_s)
+                            writer.end_packaged_element()
+                        writer.end_package()
+                except Exception:
+                    # Fallback to XML parse method (only if stubs enabled)
+                    if DEFAULT_CONFIG.emit_referenced_type_stubs:
+                        self._final_materialize_any_missing_idrefs(out_path, writer)
             writer.end_doc()
         if pretty:
             parser = etree.XMLParser(remove_blank_text=True)
