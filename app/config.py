@@ -42,14 +42,21 @@ class GeneratorConfig:
     annotate_owned_end: bool = True
     # Emission policy for unresolved referenced types
     emit_referenced_type_stubs: bool = False
+    
+    # 🚨 FALLBACK C++ PROCESSING OPTIONS
+    # TODO: Remove when migrating to clang-uml C++ library
+    cpp_processing_strategy: str = "fallback"  # "strict", "fallback", "display_name"
+    cpp_max_corruption_level: int = 2          # 0=clean only, 3=accept all  
+    cpp_preserve_raw_metadata: bool = True     # For bidirectional conversion
+    cpp_enable_profiles: bool = True           # Enable C++ type profiles
+    cpp_show_fallback_warnings: bool = True   # Show migration warnings
 
 
 DEFAULT_CONFIG = GeneratorConfig()
 
 __all__ = [
     "LayoutConfig",
-    "DiagramConfig",
+    "DiagramConfig", 
     "GeneratorConfig",
     "DEFAULT_CONFIG",
 ]
-

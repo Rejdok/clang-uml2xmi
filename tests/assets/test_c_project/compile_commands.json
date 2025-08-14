@@ -1,0 +1,7 @@
+[
+  {
+    "directory": "C:/Users/lvbnu/workspace-papyrus/uml2papyrus/tests/assets/test_c_project",
+    "command": "gcc -std=c99 -c point.c -o point.o",
+    "file": "point.c"
+  }
+]

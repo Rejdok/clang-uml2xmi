@@ -468,6 +468,7 @@ class XmiGenerator:
                         base_el = self._elements_by_id_str.get(str(aid))
                         if base_el is not None:
                             arg_names.append(str(base_el.name).split("::")[-1])
+                # Simple canonical name generation (data is now clean from build stage)
                 canonical = base + ("<" + ", ".join(arg_names) + ">" if arg_names else "")
                 inst_name = ElementName(canonical)
                 inst_xmi: Optional[XmiId] = self.name_to_xmi.get(inst_name)

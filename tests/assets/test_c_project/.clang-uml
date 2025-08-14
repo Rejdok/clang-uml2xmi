@@ -1,0 +1,13 @@
+compilation_database_dir: .
+output_directory: output
+diagrams:
+  c_class_diagram:
+    type: class
+    glob:
+      - "*.c"
+      - "*.h"
+    include:
+      paths:
+        - "."
+    exclude:
+      paths: []
